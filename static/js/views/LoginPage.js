@@ -89,10 +89,10 @@ export default defineComponent({
           <!-- Card header -->
           <div class="bg-green-600 px-6 py-5 text-white">
             <div class="flex items-center gap-3">
-              <span class="text-4xl">🏥</span>
+              <span class="text-4xl">💊</span>
               <div>
-                <h1 class="text-xl font-bold">Staff Portal Login</h1>
-                <p class="text-green-100 text-sm">Saha Pharmacy – OnePharma</p>
+                <h1 class="text-xl font-bold">OnePharma Portal Login</h1>
+                <p class="text-green-100 text-sm">App Admin · Pharmacy Owner · Staff</p>
               </div>
             </div>
           </div>

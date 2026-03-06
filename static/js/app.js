@@ -157,8 +157,22 @@ const DEFAULT_DOCTORS = [
   { id: 4, name: 'Dr. S. Roy',        specialty: 'Pulmonologist',      phone: '+91-99001-44444', clinic: 'Breath Easy Clinic, New Town', active: true },
 ];
 
+// ── Data version – bump this string whenever DEFAULT_STAFF changes  ──────────
+// Any returning browser with stale staff credentials will get a fresh seed.
+const DATA_VERSION = '3';
+const _versionKey  = 'op_data_version';
+
 // ── Seed localStorage on first visit ────────────────────────────────────────
 const seedLocalStorage = () => {
+  // If the stored data-version doesn't match, force-refresh the staff table
+  // (and orders, which also changed shape) so new role credentials take effect.
+  if (localStorage.getItem(_versionKey) !== DATA_VERSION) {
+    localStorage.removeItem('op_staff');
+    localStorage.removeItem('op_orders');
+    localStorage.removeItem('op_auth');      // clear any stale session
+    localStorage.setItem(_versionKey, DATA_VERSION);
+  }
+
   if (!localStorage.getItem('op_inventory')) {
     localStorage.setItem('op_inventory',   JSON.stringify(DEFAULT_INVENTORY));
   }
