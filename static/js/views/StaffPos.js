@@ -1,420 +1,632 @@
 /**
- * StaffPos.js – Staff Operational Hub / POS Cashier View
- *
- * Desktop/Tablet: Two-column layout
- *   LEFT  – Medicine search workspace, Generic Alternatives panel, OCR scanner
- *   RIGHT – Persistent billing cart (PosCart component) + checkout modal
- *
- * Mobile: Single-column with a floating cart-total sticky bar.
+ * StaffPos.js – Staff POS / Cashier view (complete rewrite)
+ * Two-column desktop layout; single-column + floating checkout bar on mobile.
+ * All state persisted to localStorage via helpers from app.js.
  */
-import { defineComponent, ref, computed } from 'vue';
-import PosCart      from '../components/PosCart.js';
+import { defineComponent, ref, computed, reactive, watch, nextTick } from 'vue';
 import ScannerModal from '../components/ScannerModal.js';
-import { getInventory, saveInventory } from '../app.js';
+import {
+  getInventory, saveInventory,
+  getPatients,  savePatients,
+  getDoctors,   saveDoctors,
+  getMedicineRequests, saveMedicineRequests,
+  getOrders,    saveOrders,
+  getDosageSlips, saveDosageSlips,
+} from '../app.js';
 
 export default defineComponent({
   name: 'StaffPos',
-
-  components: { PosCart, ScannerModal },
+  components: { ScannerModal },
 
   setup() {
-    // ── State ──────────────────────────────────────────────────────────────
-    const inventory   = ref(getInventory());
-    const searchQuery = ref('');
-    const cartItems   = ref([]);
+    // ── Inventory & patients ─────────────────────────────────────────────────
+    const inventory = ref(getInventory());
+    const patients  = ref(getPatients());
 
-    // Scanner / OCR
-    const showScanner      = ref(false);
-    const ocrProcessingMsg = ref('');
+    // ── Patient ──────────────────────────────────────────────────────────────
+    const patientQuery    = ref('');
+    const showPatientDrop = ref(false);
+    const selectedPatient = ref(null);
+    const newPatName      = ref('');
+    const newPatPhone     = ref('');
 
-    // Checkout modal
-    const showCheckout  = ref(false);
-    const checkoutDone  = ref(false);
+    const patientResults = computed(() => {
+      if (patientQuery.value.length < 2) return [];
+      const q = patientQuery.value.toLowerCase();
+      return patients.value
+        .filter(p => p.name?.toLowerCase().includes(q) || p.phone?.includes(q))
+        .slice(0, 5);
+    });
 
-    // Generic alternatives panel
-    const alternatives = ref([]); // array of inventory items
+    function selectPatient(p) {
+      selectedPatient.value = p; patientQuery.value = ''; showPatientDrop.value = false;
+    }
+    function clearPatient() {
+      selectedPatient.value = null; newPatName.value = ''; newPatPhone.value = '';
+    }
+    // Blur guard: close dropdown after a short tick so @mousedown.prevent on items fires first.
+    let _patBlurTimer = null;
+    function onPatBlur() { _patBlurTimer = setTimeout(() => { showPatientDrop.value = false; }, 150); }
+    function cancelPatBlur() { clearTimeout(_patBlurTimer); }
 
-    // ── Computed ───────────────────────────────────────────────────────────
-    /** Live-filtered search results. */
-    const searchResults = computed(() => {
-      const q = searchQuery.value.trim().toLowerCase();
-      if (q.length < 2) return [];
+    function patientInitials(name) {
+      return (name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    }
+
+    // Discount type definitions (extracted from template for clarity).
+    const DISCOUNT_TYPES = [
+      { k: 'percentage', l: 'Percentage' },
+      { k: 'flat',       l: 'Flat Amount' },
+      { k: 'roundoff',   l: 'Round Off' },
+    ];
+
+    // ── Doctor ───────────────────────────────────────────────────────────────
+    const doctorName = ref('');
+    const rxNotes    = ref('');
+
+    // ── Medicine search ──────────────────────────────────────────────────────
+    const medQuery = ref('');
+    const medResults = computed(() => {
+      if (medQuery.value.length < 2) return [];
+      const q = medQuery.value.toLowerCase();
       return inventory.value
-        .filter((m) =>
-          m.name.toLowerCase().includes(q) ||
-          m.brand.toLowerCase().includes(q) ||
-          m.generic.toLowerCase().includes(q)
-        )
+        .filter(m => m.name?.toLowerCase().includes(q) ||
+                     m.brand?.toLowerCase().includes(q) ||
+                     m.generic?.toLowerCase().includes(q))
         .slice(0, 8);
     });
 
-    /** Grand total for the floating mobile bar. */
-    const mobileTotal = computed(() => {
-      return cartItems.value
-        .reduce((s, i) => s + i.price * i.qty * (1 + i.gst / 100), 0)
-        .toFixed(2);
-    });
+    // ── Cart ─────────────────────────────────────────────────────────────────
+    const cart = ref([]);
 
-    // ── Methods ────────────────────────────────────────────────────────────
-    /** Add a medicine to the cart. Shows generic alternatives if branded. */
-    const addToCart = (med) => {
-      searchQuery.value = '';
-
-      // Check if already in cart → increase qty
-      const existing = cartItems.value.find((i) => i.id === med.id);
-      if (existing) {
-        existing.qty += 1;
-      } else {
-        cartItems.value.push({ id: med.id, name: med.name, price: med.price, qty: 1, gst: med.gst });
-      }
-
-      // Show generic alternatives if this is a branded medicine
-      if (med.brand !== med.generic) {
-        alternatives.value = inventory.value.filter(
-          (m) =>
-            m.ingredient === med.ingredient &&
-            m.id !== med.id &&
-            m.stock > 0
-        );
-      } else {
-        alternatives.value = [];
-      }
-    };
-
-    /** Cart qty update from PosCart component. */
-    const updateQty = ({ id, qty }) => {
-      const item = cartItems.value.find((i) => i.id === id);
-      if (item) item.qty = Math.max(1, qty);
-    };
-
-    /** Remove item from cart. */
-    const removeItem = (id) => {
-      cartItems.value = cartItems.value.filter((i) => i.id !== id);
-    };
-
-    /** Open checkout modal. */
-    const checkout = () => {
-      if (cartItems.value.length === 0) return;
-      showCheckout.value = true;
-    };
-
-    /** Confirm checkout – simulate invoice generation. */
-    const confirmCheckout = () => {
-      checkoutDone.value = true;
-      // Deduct stock from inventory (persist to localStorage)
-      cartItems.value.forEach((item) => {
-        const med = inventory.value.find((m) => m.id === item.id);
-        if (med) med.stock = Math.max(0, med.stock - item.qty);
+    function addToCart(med) {
+      if (med.stock <= 0) return;
+      const ex = cart.value.find(i => i.medId === med.id);
+      if (ex) { if (ex.qty < med.stock) ex.qty++; return; }
+      cart.value.push({
+        id: Date.now() + Math.random(), medId: med.id,
+        name: med.name, price: med.price, gst: med.gst || 0,
+        stock: med.stock, qty: 1, showDosage: false,
+        dosage: { dose: '', freq: '', timing: '', duration: '', notes: '' },
       });
-      saveInventory(inventory.value);
-    };
+      medQuery.value = '';
+      checkAlts(med);
+    }
+    function removeItem(id) { cart.value = cart.value.filter(i => i.id !== id); alternatives.value = []; }
+    function setQty(item, d) { item.qty = Math.max(1, Math.min(item.stock, item.qty + d)); }
 
-    /** Reset after checkout completes. */
-    const resetPos = () => {
-      cartItems.value    = [];
+    // ── Generic alternatives ─────────────────────────────────────────────────
+    const alternatives = ref([]);
+    const altTargetId  = ref(null);
+    function checkAlts(med) {
+      if (!med.ingredient) { alternatives.value = []; return; }
+      altTargetId.value = cart.value[cart.value.length - 1]?.id ?? null;
+      alternatives.value = inventory.value
+        .filter(m => m.ingredient === med.ingredient && m.id !== med.id && m.stock > 0)
+        .slice(0, 4);
+    }
+    function substituteItem(alt) {
+      const idx = cart.value.findIndex(i => i.id === altTargetId.value);
+      if (idx < 0) return;
+      cart.value[idx] = { ...cart.value[idx], medId: alt.id, name: alt.name, price: alt.price, gst: alt.gst || 0, stock: alt.stock };
       alternatives.value = [];
-      checkoutDone.value = false;
-      showCheckout.value = false;
-    };
+    }
 
-    /** OCR simulation – adds extracted medicines to cart. */
-    const onOcrDone = (drugNames) => {
-      ocrProcessingMsg.value = `✅ OCR extracted ${drugNames.length} medicines. Adding to cart…`;
-      drugNames.forEach((name) => {
-        const med = inventory.value.find(
-          (m) => m.name.toLowerCase() === name.toLowerCase()
-        );
-        if (med) addToCart(med);
+    // ── Discount & totals ────────────────────────────────────────────────────
+    const discountType = ref('percentage');  // 'percentage' | 'flat' | 'roundoff'
+    const discountPct  = ref(0);
+    const flatFinal    = ref(0);
+    const adjustGst    = ref(false);
+
+    const subtotal   = computed(() => cart.value.reduce((s, i) => s + i.price * i.qty, 0));
+    const rawGst     = computed(() => cart.value.reduce((s, i) => s + i.price * i.qty * (i.gst / 100), 0));
+    const grossTotal = computed(() => +(subtotal.value + rawGst.value).toFixed(2));
+
+    const discountAmount = computed(() => {
+      if (!cart.value.length) return 0;
+      if (discountType.value === 'percentage')
+        return +(grossTotal.value * discountPct.value / 100).toFixed(2);
+      return +Math.max(0, grossTotal.value - flatFinal.value).toFixed(2);
+    });
+    const gstAmount = computed(() => {
+      if (adjustGst.value && discountAmount.value > 0 && grossTotal.value > 0)
+        return +(rawGst.value * (1 - discountAmount.value / grossTotal.value)).toFixed(2);
+      return +rawGst.value.toFixed(2);
+    });
+    const finalTotal = computed(() => +(grossTotal.value - discountAmount.value).toFixed(2));
+
+    watch(discountType, () => { discountPct.value = 0; flatFinal.value = grossTotal.value; });
+    watch(grossTotal, v => {
+      if (discountType.value !== 'percentage') flatFinal.value = +v.toFixed(2);
+    });
+    function setRoundOff(unit) { flatFinal.value = Math.floor(grossTotal.value / unit) * unit; }
+
+    // ── Add New Medicine modal ───────────────────────────────────────────────
+    const showAddMed = ref(false);
+    const aiLoading  = ref(false);
+    const addMedMsg  = ref('');
+    const newMed = reactive({ name: '', brand: '', generic: '', category: '', price: '', gst: 5, images: [] });
+
+    function aiIdentify() {
+      // NOTE: AI identification is a mock for Phase 1. Replace with real OCR/AI API in Phase 2.
+      aiLoading.value = true;
+      setTimeout(() => {
+        Object.assign(newMed, { brand: 'AutoBrand', generic: 'Paracetamol', category: 'Analgesic', price: 22, gst: 5 });
+        aiLoading.value = false;
+      }, 1500);
+    }
+    function handleMedImages(e) {
+      // Revoke previous object URLs to avoid memory leaks before creating new ones.
+      newMed.images.forEach(u => URL.revokeObjectURL(u));
+      newMed.images = Array.from(e.target.files).slice(0, 4).map(f => URL.createObjectURL(f));
+    }
+    function clearNewMedImages() {
+      newMed.images.forEach(u => URL.revokeObjectURL(u));
+      newMed.images = [];
+    }
+    function saveNewMedicine() {
+      if (!newMed.name.trim()) return;
+      const inv = getInventory();
+      const entry = {
+        id: Date.now(), name: newMed.name.trim(), brand: newMed.brand, generic: newMed.generic,
+        ingredient: newMed.generic, category: newMed.category,
+        price: +newMed.price || 0, gst: +newMed.gst || 0,
+        stock: 0, minStock: 10, expiry: '', supplier: 'Local',
+      };
+      inv.push(entry); saveInventory(inv); inventory.value = inv;
+      const reqs = getMedicineRequests();
+      reqs.push({ ...entry, status: 'pending', requestedAt: new Date().toISOString() });
+      saveMedicineRequests(reqs);
+      addMedMsg.value = 'Medicine added locally. Request sent to admin for master DB inclusion.';
+      clearNewMedImages();
+      Object.assign(newMed, { name: '', brand: '', generic: '', category: '', price: '', gst: 5 });
+      setTimeout(() => { addMedMsg.value = ''; showAddMed.value = false; }, 2800);
+    }
+    function closeAddMed() { clearNewMedImages(); showAddMed.value = false; addMedMsg.value = ''; }
+
+    // ── Checkout ─────────────────────────────────────────────────────────────
+    const showCheckout  = ref(false);
+    const checkoutDone  = ref(false);
+    const invoiceNumber = ref('');
+
+    function openCheckout() { if (!cart.value.length) return; showCheckout.value = true; checkoutDone.value = false; }
+
+    function confirmCheckout() {
+      const inv = getInventory();
+      cart.value.forEach(item => {
+        const m = inv.find(m => m.id === item.medId);
+        if (m) m.stock = Math.max(0, m.stock - item.qty);
       });
-      setTimeout(() => { ocrProcessingMsg.value = ''; }, 4000);
-    };
+      saveInventory(inv); inventory.value = inv;
 
-    /** Invoice number generator. */
-    const invoiceNo = () => `INV-${Date.now().toString().slice(-6)}`;
+      let patient = selectedPatient.value;
+      if (!patient && newPatName.value.trim()) {
+        const pts = getPatients();
+        patient = { id: Date.now(), name: newPatName.value.trim(), phone: newPatPhone.value };
+        pts.push(patient); savePatients(pts); patients.value = pts; selectedPatient.value = patient;
+      }
+
+      invoiceNumber.value = 'INV-' + Date.now().toString().slice(-6);
+      const orders = getOrders();
+      orders.unshift({
+        id: invoiceNumber.value,
+        patientName: patient?.name || 'Walk-in', patientPhone: patient?.phone || '',
+        doctorName: doctorName.value, rxNotes: rxNotes.value,
+        items: cart.value.map(i => ({ medId: i.medId, name: i.name, qty: i.qty, price: i.price, gst: i.gst })),
+        subtotal: subtotal.value, gstAmount: gstAmount.value,
+        discountAmount: discountAmount.value, finalTotal: finalTotal.value,
+        createdAt: new Date().toISOString(), status: 'completed',
+      });
+      saveOrders(orders);
+
+      const slips = getDosageSlips();
+      cart.value.forEach(item => {
+        if (item.dosage.dose || item.dosage.freq || item.dosage.notes) {
+          slips.unshift({
+            id: Date.now() + Math.random(), orderId: invoiceNumber.value,
+            patientName: patient?.name || 'Walk-in', medicineName: item.name,
+            ...item.dosage, createdAt: new Date().toISOString(),
+          });
+        }
+      });
+      saveDosageSlips(slips);
+      checkoutDone.value = true;
+    }
+
+    function newTransaction() {
+      cart.value = []; alternatives.value = []; selectedPatient.value = null;
+      newPatName.value = ''; newPatPhone.value = ''; doctorName.value = ''; rxNotes.value = '';
+      discountType.value = 'percentage'; discountPct.value = 0; flatFinal.value = 0;
+      adjustGst.value = false; showCheckout.value = false; checkoutDone.value = false;
+    }
+
+    // ── Scanner ───────────────────────────────────────────────────────────────
+    const showScanner = ref(false);
+    function onOcrDone(drugs) {
+      drugs.forEach(name => {
+        const m = inventory.value.find(m => m.name.toLowerCase().includes(name.toLowerCase()));
+        if (m && m.stock > 0) addToCart(m);
+      });
+      showScanner.value = false;
+    }
 
     return {
-      inventory, searchQuery, searchResults,
-      cartItems, mobileTotal,
-      addToCart, updateQty, removeItem,
-      checkout, confirmCheckout, resetPos,
-      showCheckout, checkoutDone,
-      showScanner, onOcrDone, ocrProcessingMsg,
-      alternatives,
-      invoiceNo,
+      inventory, patients,
+      patientQuery, showPatientDrop, selectedPatient, newPatName, newPatPhone,
+      patientResults, selectPatient, clearPatient, onPatBlur, cancelPatBlur, patientInitials,
+      doctorName, rxNotes,
+      medQuery, medResults, addToCart,
+      cart, removeItem, setQty,
+      alternatives, substituteItem,
+      discountType, discountPct, flatFinal, adjustGst, setRoundOff, DISCOUNT_TYPES,
+      subtotal, rawGst, gstAmount, grossTotal, discountAmount, finalTotal,
+      showAddMed, aiLoading, addMedMsg, newMed, aiIdentify, handleMedImages, saveNewMedicine, closeAddMed,
+      showCheckout, checkoutDone, invoiceNumber, openCheckout, confirmCheckout, newTransaction,
+      showScanner, onOcrDone,
     };
   },
 
   template: `
-    <div class="min-h-[calc(100vh-3.5rem)] bg-gray-100">
+<div class="min-h-screen bg-gray-50 pb-24 md:pb-4">
 
-      <!-- ══════════════════════════════════════════════════════
-           DESKTOP / TABLET  –  Two-column layout (md and above)
-           ══════════════════════════════════════════════════════ -->
-      <div class="hidden md:flex h-[calc(100vh-3.5rem)]">
+  <!-- ── Top bar ─────────────────────────────────────────────────────────── -->
+  <div class="bg-white border-b px-4 py-3 flex items-center justify-between sticky top-0 z-10 shadow-sm">
+    <h1 class="text-lg font-bold text-green-700 flex items-center gap-2">
+      <span class="text-2xl">💊</span> Staff POS
+    </h1>
+    <div class="flex items-center gap-2">
+      <button @click="showScanner=true"
+        class="flex items-center gap-1 text-sm bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 px-3 py-1.5 rounded-lg transition">
+        <span>📷</span> Scan Rx
+      </button>
+      <button v-if="cart.length" @click="openCheckout"
+        class="hidden md:flex items-center gap-1 text-sm bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg transition font-semibold">
+        Checkout ₹{{ finalTotal.toFixed(2) }}
+      </button>
+    </div>
+  </div>
 
-        <!-- LEFT WORKSPACE ─────────────────────────────────── -->
-        <div class="flex-1 flex flex-col overflow-y-auto px-6 py-5 gap-4">
+  <!-- ── Two-column layout ──────────────────────────────────────────────── -->
+  <div class="max-w-7xl mx-auto p-4 flex flex-col md:flex-row gap-4 items-start">
 
-          <div class="flex items-center justify-between">
-            <h1 class="text-xl font-bold text-gray-900">⚡ POS Billing</h1>
-            <!-- OCR scanner button -->
-            <button
-              @click="showScanner = true"
-              class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-            >
-              <span>📝</span> Scan Prescription
-            </button>
+    <!-- ══ LEFT PANEL ══════════════════════════════════════════════════════ -->
+    <div class="w-full md:flex-1 space-y-4">
+
+      <!-- Patient Info Card -->
+      <div class="bg-white rounded-2xl p-4 shadow-sm">
+        <h2 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2"><span>👤</span> Patient</h2>
+        <div v-if="selectedPatient" class="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-3 py-2">
+          <span class="w-8 h-8 rounded-full bg-green-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
+            {{ patientInitials(selectedPatient.name) }}
+          </span>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-semibold text-gray-800 truncate">{{ selectedPatient.name }}</p>
+            <p class="text-xs text-gray-500">{{ selectedPatient.phone }}</p>
           </div>
-
-          <!-- OCR result banner -->
-          <div v-if="ocrProcessingMsg" class="bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-xl px-4 py-3 text-sm font-medium">
-            {{ ocrProcessingMsg }}
-          </div>
-
-          <!-- Medicine search -->
-          <div class="relative">
-            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
-            <input
-              v-model="searchQuery"
-              type="text"
-              placeholder="Search medicine by name, brand, or generic…"
-              class="w-full pl-10 pr-4 py-3 border-2 border-gray-200 focus:border-green-500 rounded-xl text-sm outline-none bg-white transition"
-              autocomplete="off"
-            />
-          </div>
-
-          <!-- Search results dropdown -->
-          <div v-if="searchResults.length > 0" class="bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
-            <div
-              v-for="med in searchResults"
-              :key="med.id"
-              @click="addToCart(med)"
-              class="flex items-center justify-between px-4 py-3 hover:bg-green-50 cursor-pointer border-b last:border-b-0 border-gray-100 transition"
-            >
-              <div>
-                <p class="text-sm font-semibold text-gray-900">{{ med.name }}</p>
-                <p class="text-xs text-gray-500">{{ med.brand }} · {{ med.category }}</p>
-              </div>
-              <div class="text-right shrink-0 ml-4">
-                <p class="text-sm font-bold text-green-700">₹{{ med.price }}</p>
-                <span :class="['text-xs font-medium', med.stock > 0 ? 'text-green-600' : 'text-red-500']">
-                  {{ med.stock > 0 ? med.stock + ' in stock' : 'Out of stock' }}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Generic Alternatives panel -->
-          <div v-if="alternatives.length > 0" class="bg-blue-50 border border-blue-200 rounded-xl p-4">
-            <h3 class="text-sm font-bold text-blue-800 mb-3 flex items-center gap-2">
-              <span>💡</span> Generic Alternatives Available
-            </h3>
-            <div class="space-y-2">
-              <div
-                v-for="alt in alternatives"
-                :key="alt.id"
-                class="bg-white rounded-xl px-3 py-2.5 flex items-center justify-between shadow-sm border border-blue-100"
-              >
-                <div>
-                  <p class="text-sm font-medium text-gray-800">{{ alt.name }}</p>
-                  <p class="text-xs text-gray-500">{{ alt.generic }} · {{ alt.stock }} units</p>
-                </div>
-                <div class="flex items-center gap-3">
-                  <p class="text-sm font-bold text-blue-700">₹{{ alt.price }}</p>
-                  <button
-                    @click="addToCart(alt)"
-                    class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-medium transition"
-                  >Add</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Empty workspace hint -->
-          <div v-if="searchQuery.length < 2 && !alternatives.length" class="flex flex-col items-center justify-center flex-1 text-gray-400 py-10">
-            <span class="text-6xl mb-3">🏪</span>
-            <p class="text-sm font-medium">Type a medicine name to begin billing</p>
-            <p class="text-xs mt-1">or use Scan Prescription to auto-fill via OCR</p>
-          </div>
+          <button @click="clearPatient" class="text-gray-400 hover:text-red-500 text-lg leading-none">×</button>
         </div>
-
-        <!-- RIGHT CART ──────────────────────────────────────── -->
-        <div class="w-80 xl:w-96 flex flex-col border-l border-gray-200 bg-white shadow-inner">
-          <PosCart
-            :items="cartItems"
-            @update-qty="updateQty"
-            @remove-item="removeItem"
-            @checkout="checkout"
-            class="flex-1"
-          />
+        <div v-else class="space-y-2">
+          <div class="relative">
+            <input v-model="patientQuery" @focus="showPatientDrop=true" @blur="onPatBlur" @mousedown="cancelPatBlur"
+              placeholder="Search patient by name or phone…"
+              class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+            <div v-if="showPatientDrop && patientResults.length"
+              class="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-20 mt-1 overflow-hidden">
+              <button v-for="p in patientResults" :key="p.id" @mousedown.prevent="selectPatient(p)"
+                class="w-full text-left px-3 py-2 hover:bg-green-50 text-sm border-b last:border-0">
+                <span class="font-medium">{{ p.name }}</span>
+                <span class="text-gray-400 ml-2 text-xs">{{ p.phone }}</span>
+              </button>
+            </div>
+            <div v-if="showPatientDrop && patientQuery.length>=2 && !patientResults.length"
+              class="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-20 mt-1 px-3 py-2 text-sm text-gray-500">
+              No match — fill below to add new patient
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <input v-model="newPatName" placeholder="Patient name"
+              class="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+            <input v-model="newPatPhone" placeholder="Phone"
+              class="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+          </div>
         </div>
       </div>
 
+      <!-- Doctor Info -->
+      <div class="bg-white rounded-2xl p-4 shadow-sm">
+        <h2 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2"><span>🩺</span> Doctor / Prescription</h2>
+        <input v-model="doctorName" placeholder="Doctor name (optional)"
+          class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-green-400" />
+        <textarea v-model="rxNotes" placeholder="Diagnosis / prescription notes (optional)" rows="2"
+          class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-400"></textarea>
+      </div>
 
-      <!-- ══════════════════════════════════════════════════════
-           MOBILE  –  Single-column with floating cart bar
-           ══════════════════════════════════════════════════════ -->
-      <div class="md:hidden flex flex-col px-4 pt-5 pb-24 gap-4">
-
-        <div class="flex items-center justify-between">
-          <h1 class="text-xl font-bold text-gray-900">⚡ POS Billing</h1>
-          <button
-            @click="showScanner = true"
-            class="flex items-center gap-1 bg-indigo-600 text-white text-xs font-semibold px-3 py-2 rounded-lg"
-          >
-            📝 Scan Rx
+      <!-- Medicine Search -->
+      <div class="bg-white rounded-2xl p-4 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-gray-700 flex items-center gap-2"><span>🔍</span> Medicine Search</h2>
+          <button @click="showAddMed=true"
+            class="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg transition font-medium">
+            + Add New Medicine
           </button>
         </div>
-
-        <div v-if="ocrProcessingMsg" class="bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-xl px-4 py-3 text-sm font-medium">
-          {{ ocrProcessingMsg }}
-        </div>
-
-        <!-- Mobile search -->
-        <div class="relative">
-          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
-          <input
-            v-model="searchQuery"
-            type="text"
-            placeholder="Search medicine…"
-            class="w-full pl-10 pr-4 py-3 border-2 border-gray-200 focus:border-green-500 rounded-xl text-sm outline-none bg-white"
-            autocomplete="off"
-          />
-        </div>
-
-        <div v-if="searchResults.length > 0" class="bg-white rounded-xl border border-gray-200 shadow overflow-hidden">
-          <div
-            v-for="med in searchResults"
-            :key="med.id"
-            @click="addToCart(med)"
-            class="flex items-center justify-between px-4 py-3 hover:bg-green-50 cursor-pointer border-b last:border-b-0 border-gray-100"
-          >
-            <div>
-              <p class="text-sm font-semibold text-gray-900">{{ med.name }}</p>
-              <p class="text-xs text-gray-500">{{ med.brand }}</p>
+        <input v-model="medQuery" placeholder="Type medicine name, brand or generic (min 2 chars)…"
+          class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 mb-2" />
+        <div v-if="medResults.length" class="space-y-1 max-h-64 overflow-y-auto">
+          <div v-for="m in medResults" :key="m.id"
+            class="flex items-center justify-between rounded-xl px-3 py-2 text-sm transition"
+            :class="m.stock>0 ? 'hover:bg-green-50 cursor-pointer' : 'opacity-50 bg-gray-50'">
+            <div @click="addToCart(m)" class="flex-1 min-w-0">
+              <p class="font-medium text-gray-800 truncate">{{ m.name }}</p>
+              <p class="text-xs text-gray-500">{{ m.brand }} · {{ m.generic }}</p>
             </div>
-            <div class="text-right shrink-0 ml-4">
-              <p class="text-sm font-bold text-green-700">₹{{ med.price }}</p>
-              <span :class="['text-xs', med.stock > 0 ? 'text-green-600' : 'text-red-500']">
-                {{ med.stock > 0 ? med.stock + ' left' : 'Out' }}
+            <div class="flex items-center gap-3 ml-3 flex-shrink-0">
+              <span class="text-xs" :class="m.stock>0?'text-green-600':'text-red-500 font-semibold'">
+                {{ m.stock>0 ? 'Stock: '+m.stock : 'Out of stock' }}
               </span>
+              <span class="text-sm font-semibold text-gray-700">₹{{ m.price }}</span>
+              <button v-if="m.stock>0" @click="addToCart(m)"
+                class="bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-1 rounded-lg transition">Add</button>
             </div>
           </div>
         </div>
+        <p v-else-if="medQuery.length>=2" class="text-sm text-gray-400 text-center py-3">No medicines found.</p>
+      </div>
 
-        <!-- Generic alternatives mobile -->
-        <div v-if="alternatives.length > 0" class="bg-blue-50 border border-blue-200 rounded-xl p-3">
-          <p class="text-xs font-bold text-blue-800 mb-2">💡 Generic alternatives:</p>
-          <div class="space-y-2">
-            <div v-for="alt in alternatives" :key="alt.id" class="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-blue-100">
-              <div>
-                <p class="text-xs font-medium text-gray-800">{{ alt.name }}</p>
-                <p class="text-xs text-gray-400">₹{{ alt.price }}</p>
-              </div>
-              <button @click="addToCart(alt)" class="text-xs bg-blue-600 text-white px-2 py-1 rounded-lg">Add</button>
+      <!-- Generic Alternatives -->
+      <div v-if="alternatives.length" class="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm">
+        <h2 class="text-sm font-semibold text-amber-800 mb-2 flex items-center gap-2"><span>🔄</span> Generic Alternatives</h2>
+        <div class="space-y-2">
+          <div v-for="alt in alternatives" :key="alt.id"
+            class="flex items-center justify-between bg-white rounded-xl px-3 py-2 shadow-xs">
+            <div>
+              <p class="text-sm font-medium text-gray-800">{{ alt.name }}</p>
+              <p class="text-xs text-gray-500">{{ alt.brand }} · ₹{{ alt.price }} · Stock: {{ alt.stock }}</p>
             </div>
-          </div>
-        </div>
-
-        <!-- Cart list mobile -->
-        <div v-if="cartItems.length > 0" class="bg-white rounded-xl border border-gray-200 shadow overflow-hidden">
-          <div class="px-4 py-2 bg-green-700 text-white text-sm font-bold">🛒 Cart ({{ cartItems.length }} items)</div>
-          <div v-for="item in cartItems" :key="item.id" class="flex items-center px-4 py-3 border-b last:border-b-0 border-gray-100 gap-2">
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-gray-900 truncate">{{ item.name }}</p>
-              <p class="text-xs text-gray-500">₹{{ item.price }} × {{ item.qty }}</p>
-            </div>
-            <button @click="removeItem(item.id)" class="text-red-400 hover:text-red-600 text-lg">×</button>
+            <button @click="substituteItem(alt)"
+              class="text-xs bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded-lg transition">Substitute</button>
           </div>
         </div>
       </div>
 
-      <!-- Floating checkout bar (mobile) -->
-      <div v-if="cartItems.length > 0" class="md:hidden fixed bottom-0 left-0 right-0 bg-green-700 text-white px-4 py-3 flex items-center justify-between shadow-lg z-30">
-        <span class="text-sm">{{ cartItems.length }} item(s) · <strong>₹{{ mobileTotal }}</strong></span>
-        <button
-          @click="checkout"
-          class="bg-white text-green-700 font-bold text-sm px-4 py-2 rounded-lg"
-        >
-          Checkout →
+    </div><!-- /LEFT PANEL -->
+
+    <!-- ══ RIGHT PANEL ═════════════════════════════════════════════════════ -->
+    <div class="w-full md:w-96 space-y-4">
+
+      <!-- Cart Items -->
+      <div class="bg-white rounded-2xl p-4 shadow-sm">
+        <h2 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2"><span>🛒</span> Cart
+          <span v-if="cart.length" class="ml-auto text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">{{ cart.length }} item{{ cart.length>1?'s':'' }}</span>
+        </h2>
+        <div v-if="!cart.length" class="text-center py-8 text-gray-400 text-sm">
+          <div class="text-3xl mb-2">🛒</div>Search and add medicines above
+        </div>
+        <div v-else class="space-y-3 max-h-96 overflow-y-auto pr-1">
+          <div v-for="item in cart" :key="item.id" class="bg-gray-50 rounded-xl p-3">
+            <div class="flex items-start justify-between gap-2">
+              <p class="text-sm font-medium text-gray-800 flex-1 min-w-0 leading-tight">{{ item.name }}</p>
+              <button @click="removeItem(item.id)" class="text-gray-300 hover:text-red-500 text-xl leading-none flex-shrink-0 mt-0.5">×</button>
+            </div>
+            <div class="flex items-center justify-between mt-2">
+              <div class="flex items-center gap-1">
+                <button @click="setQty(item,-1)" class="w-6 h-6 rounded-full bg-gray-200 hover:bg-gray-300 text-sm font-bold flex items-center justify-center">−</button>
+                <span class="w-7 text-center text-sm font-semibold">{{ item.qty }}</span>
+                <button @click="setQty(item,1)" class="w-6 h-6 rounded-full bg-gray-200 hover:bg-gray-300 text-sm font-bold flex items-center justify-center">+</button>
+              </div>
+              <div class="text-right">
+                <p class="text-sm font-semibold text-gray-800">₹{{ (item.price * item.qty).toFixed(2) }}</p>
+                <p class="text-xs text-gray-400">₹{{ item.price }} each</p>
+              </div>
+            </div>
+            <!-- Dosage editor -->
+            <button @click="item.showDosage=!item.showDosage"
+              class="mt-2 text-xs text-green-600 hover:text-green-800 flex items-center gap-1 font-medium">
+              <span>📋 Dosage Info</span>
+              <span class="text-xs">{{ item.showDosage ? '▲' : '▼' }}</span>
+            </button>
+            <div v-if="item.showDosage" class="mt-2 grid grid-cols-2 gap-1.5">
+              <input v-model="item.dosage.dose" placeholder="Dose (e.g. 1 tablet)"
+                class="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-400" />
+              <input v-model="item.dosage.freq" placeholder="Frequency"
+                class="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-400" />
+              <input v-model="item.dosage.timing" placeholder="Timing (before/after food)"
+                class="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-400" />
+              <input v-model="item.dosage.duration" placeholder="Duration (e.g. 5 days)"
+                class="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-400" />
+              <input v-model="item.dosage.notes" placeholder="Notes"
+                class="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-green-400" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Discount Section -->
+      <div v-if="cart.length" class="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+        <h2 class="text-sm font-semibold text-gray-700 flex items-center gap-2"><span>🏷️</span> Discount</h2>
+        <!-- Type toggle -->
+        <div class="flex rounded-xl overflow-hidden border border-gray-200 text-xs font-medium">
+          <button v-for="t in DISCOUNT_TYPES" :key="t.k"
+            @click="discountType=t.k"
+            class="flex-1 py-2 transition"
+            :class="discountType===t.k ? 'bg-green-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'">
+            {{ t.l }}
+          </button>
+        </div>
+        <!-- Percentage mode -->
+        <div v-if="discountType==='percentage'" class="space-y-2">
+          <input type="range" v-model.number="discountPct" min="0" max="50" step="5"
+            class="w-full accent-green-600" />
+          <div class="flex items-center gap-2">
+            <input type="number" v-model.number="discountPct" min="0" max="50"
+              class="w-20 border border-gray-200 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-green-400" />
+            <span class="text-sm text-gray-600">% off</span>
+            <span class="ml-auto text-sm font-semibold text-red-500">−₹{{ discountAmount.toFixed(2) }}</span>
+          </div>
+        </div>
+        <!-- Flat Amount mode -->
+        <div v-if="discountType==='flat'" class="space-y-2">
+          <label class="text-xs text-gray-500">Customer pays (₹)</label>
+          <div class="flex items-center gap-2">
+            <input type="number" v-model.number="flatFinal" :max="grossTotal" min="0"
+              class="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+            <span class="text-xs text-gray-500">of ₹{{ grossTotal.toFixed(2) }}</span>
+          </div>
+          <p class="text-xs text-green-600">Discount: ₹{{ discountAmount.toFixed(2) }}
+            ({{ grossTotal>0?(discountAmount/grossTotal*100).toFixed(1):0 }}%)</p>
+        </div>
+        <!-- Round Off mode -->
+        <div v-if="discountType==='roundoff'" class="space-y-2">
+          <div class="flex gap-2">
+            <button @click="setRoundOff(1)"  class="flex-1 border border-gray-200 rounded-lg py-2 text-xs hover:bg-green-50 hover:border-green-400 transition">Round to ₹1</button>
+            <button @click="setRoundOff(10)" class="flex-1 border border-gray-200 rounded-lg py-2 text-xs hover:bg-green-50 hover:border-green-400 transition">Round to ₹10</button>
+            <button @click="setRoundOff(100)" class="flex-1 border border-gray-200 rounded-lg py-2 text-xs hover:bg-green-50 hover:border-green-400 transition">Round to ₹100</button>
+          </div>
+          <p class="text-xs text-green-600">Final: ₹{{ flatFinal.toFixed(2) }} · Discount: ₹{{ discountAmount.toFixed(2) }}</p>
+        </div>
+        <!-- Adjust GST -->
+        <label class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
+          <input type="checkbox" v-model="adjustGst" class="accent-green-600 w-4 h-4" />
+          Adjust GST on discounted amount
+        </label>
+      </div>
+
+      <!-- Totals -->
+      <div v-if="cart.length" class="bg-white rounded-2xl p-4 shadow-sm space-y-1.5">
+        <h2 class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2"><span>🧾</span> Totals</h2>
+        <div class="flex justify-between text-sm text-gray-600"><span>Subtotal (pre-GST)</span><span>₹{{ subtotal.toFixed(2) }}</span></div>
+        <div class="flex justify-between text-sm text-gray-600"><span>GST</span><span>₹{{ gstAmount.toFixed(2) }}</span></div>
+        <div v-if="discountAmount>0" class="flex justify-between text-sm text-red-500 font-medium"><span>Discount</span><span>−₹{{ discountAmount.toFixed(2) }}</span></div>
+        <div class="border-t border-gray-100 pt-2 flex justify-between text-base font-bold text-green-700">
+          <span>Total</span><span>₹{{ finalTotal.toFixed(2) }}</span>
+        </div>
+        <button @click="openCheckout"
+          class="w-full mt-3 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-xl transition text-sm">
+          Proceed to Checkout →
         </button>
       </div>
 
+    </div><!-- /RIGHT PANEL -->
+  </div>
 
-      <!-- ══════════════════════════════════════════════════════
-           OCR SCANNER MODAL
-           ══════════════════════════════════════════════════════ -->
-      <ScannerModal
-        v-model:show="showScanner"
-        title="Scan Handwritten Prescription"
-        mode="staff"
-        @ocr-done="onOcrDone"
-      />
+  <!-- ── Mobile floating checkout bar ─────────────────────────────────── -->
+  <div v-if="cart.length" class="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg px-4 py-3 flex items-center gap-3 z-20">
+    <div class="flex-1">
+      <p class="text-xs text-gray-500">{{ cart.length }} item{{ cart.length>1?'s':'' }} · <span v-if="discountAmount>0" class="text-red-500">−₹{{ discountAmount.toFixed(2) }}</span></p>
+      <p class="text-lg font-bold text-green-700">₹{{ finalTotal.toFixed(2) }}</p>
+    </div>
+    <button @click="openCheckout" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-xl transition">
+      Checkout
+    </button>
+  </div>
 
-
-      <!-- ══════════════════════════════════════════════════════
-           CHECKOUT MODAL
-           ══════════════════════════════════════════════════════ -->
-      <Transition name="fade">
-        <div
-          v-if="showCheckout"
-          class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
-          @click.self="!checkoutDone && (showCheckout = false)"
-        >
-          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-
-            <!-- ── PRE-CONFIRM state ── -->
-            <template v-if="!checkoutDone">
-              <h2 class="text-lg font-bold text-gray-900 mb-1">Confirm Checkout</h2>
-              <p class="text-sm text-gray-500 mb-4">Review and confirm the order to generate an invoice.</p>
-
-              <ul class="divide-y divide-gray-100 mb-4 text-sm max-h-48 overflow-y-auto">
-                <li v-for="item in cartItems" :key="item.id" class="flex justify-between py-2">
-                  <span class="text-gray-700">{{ item.name }} × {{ item.qty }}</span>
-                  <span class="font-medium text-gray-900">₹{{ (item.price * item.qty * (1 + item.gst / 100)).toFixed(2) }}</span>
-                </li>
-              </ul>
-
-              <div class="flex gap-3">
-                <button
-                  @click="showCheckout = false"
-                  class="flex-1 py-2.5 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition"
-                >Cancel</button>
-                <button
-                  @click="confirmCheckout"
-                  class="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition"
-                >Confirm &amp; Pay</button>
-              </div>
-            </template>
-
-            <!-- ── POST-CONFIRM (success) state ── -->
-            <template v-else>
-              <div class="text-center py-4">
-                <div class="text-6xl mb-3">🎉</div>
-                <h2 class="text-xl font-bold text-green-700 mb-1">Payment Successful!</h2>
-                <p class="text-sm text-gray-500 mb-1">Invoice <strong>{{ invoiceNo() }}</strong> generated.</p>
-                <p class="text-xs text-gray-400 mb-5">A digital dosage slip has been sent to the patient's portal.</p>
-
-                <div class="flex flex-col gap-2">
-                  <button
-                    class="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition flex items-center justify-center gap-2"
-                    @click="() => alert('PDF download will be available once the Flask backend is integrated in Phase 2.')"
-                  >
-                    <span>📄</span> Download PDF Invoice
-                  </button>
-                  <button
-                    @click="resetPos"
-                    class="w-full py-2.5 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition"
-                  >
-                    New Transaction
-                  </button>
-                </div>
-              </div>
-            </template>
+  <!-- ══ Add New Medicine Modal ═══════════════════════════════════════════ -->
+  <div v-if="showAddMed" class="fixed inset-0 bg-black/50 flex items-center justify-center z-30 p-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-screen overflow-y-auto p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-bold text-gray-800 text-base">➕ Add New Medicine</h3>
+        <button @click="closeAddMed" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+      </div>
+      <div class="space-y-3">
+        <input v-model="newMed.name" placeholder="Medicine name *"
+          class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+        <div class="grid grid-cols-2 gap-2">
+          <input v-model="newMed.brand" placeholder="Brand name"
+            class="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+          <input v-model="newMed.generic" placeholder="Generic / ingredient"
+            class="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+          <input v-model="newMed.category" placeholder="Category"
+            class="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+          <input v-model.number="newMed.price" type="number" placeholder="Price (₹)"
+            class="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+          <input v-model.number="newMed.gst" type="number" placeholder="GST %"
+            class="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+        </div>
+        <!-- Image upload -->
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">Packaging images (up to 4)</label>
+          <input type="file" accept="image/*" multiple @change="handleMedImages"
+            class="w-full text-xs text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-green-50 file:text-green-700 hover:file:bg-green-100" />
+          <div v-if="newMed.images.length" class="flex gap-2 mt-2 flex-wrap">
+            <img v-for="(src,i) in newMed.images" :key="i" :src="src"
+              class="w-16 h-16 object-cover rounded-lg border border-gray-200" />
           </div>
         </div>
-      </Transition>
-
+        <!-- AI Identify -->
+        <button @click="aiIdentify" :disabled="aiLoading"
+          class="w-full flex items-center justify-center gap-2 border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 text-sm py-2 rounded-xl transition font-medium disabled:opacity-60">
+          <span v-if="aiLoading" class="animate-spin">⏳</span>
+          <span v-else>🤖</span>
+          {{ aiLoading ? 'AI identifying…' : 'AI Identify' }}
+        </button>
+        <div v-if="addMedMsg" class="bg-green-50 border border-green-200 text-green-700 text-sm rounded-xl px-3 py-2">
+          ✅ {{ addMedMsg }}
+        </div>
+        <button @click="saveNewMedicine" :disabled="!newMed.name.trim()"
+          class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50">
+          Save Medicine
+        </button>
+      </div>
     </div>
-  `,
+  </div>
+
+  <!-- ══ Checkout Modal ════════════════════════════════════════════════════ -->
+  <div v-if="showCheckout" class="fixed inset-0 bg-black/50 flex items-center justify-center z-30 p-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-screen overflow-y-auto p-5">
+      <div v-if="!checkoutDone">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-bold text-gray-800 text-base">🧾 Confirm Order</h3>
+          <button @click="showCheckout=false" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+        </div>
+        <div class="space-y-1 text-sm text-gray-600 mb-4">
+          <p><span class="font-medium">Patient:</span> {{ selectedPatient?.name || newPatName || 'Walk-in' }}</p>
+          <p v-if="doctorName"><span class="font-medium">Doctor:</span> {{ doctorName }}</p>
+        </div>
+        <!-- Order items -->
+        <div class="bg-gray-50 rounded-xl p-3 mb-4 space-y-1.5">
+          <div v-for="item in cart" :key="item.id" class="flex justify-between text-sm">
+            <span class="text-gray-700">{{ item.name }} × {{ item.qty }}</span>
+            <span class="font-medium text-gray-800">₹{{ (item.price*item.qty).toFixed(2) }}</span>
+          </div>
+        </div>
+        <!-- Dosage slips notice -->
+        <div v-if="cart.some(i=>i.dosage.dose||i.dosage.freq)" class="bg-blue-50 border border-blue-200 text-blue-700 text-xs rounded-xl px-3 py-2 mb-3">
+          📋 Dosage slips will be created for items with dosage info.
+        </div>
+        <!-- Totals breakdown -->
+        <div class="space-y-1 text-sm mb-4">
+          <div class="flex justify-between text-gray-600"><span>Subtotal</span><span>₹{{ subtotal.toFixed(2) }}</span></div>
+          <div class="flex justify-between text-gray-600"><span>GST</span><span>₹{{ gstAmount.toFixed(2) }}</span></div>
+          <div v-if="discountAmount>0" class="flex justify-between text-red-500 font-medium">
+            <span>Discount ({{ discountType==='percentage'?discountPct+'%':'flat' }})</span>
+            <span>−₹{{ discountAmount.toFixed(2) }}</span>
+          </div>
+          <div class="flex justify-between text-base font-bold text-green-700 border-t border-gray-100 pt-2">
+            <span>Final Total</span><span>₹{{ finalTotal.toFixed(2) }}</span>
+          </div>
+        </div>
+        <button @click="confirmCheckout"
+          class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-xl transition">
+          ✅ Confirm &amp; Print Invoice
+        </button>
+      </div>
+      <!-- Success state -->
+      <div v-else class="text-center py-6 space-y-4">
+        <div class="text-5xl">🎉</div>
+        <h3 class="font-bold text-gray-800 text-lg">Order Confirmed!</h3>
+        <p class="text-green-600 font-semibold text-base">{{ invoiceNumber }}</p>
+        <p class="text-gray-500 text-sm">Total collected: <strong class="text-gray-800">₹{{ finalTotal.toFixed(2) }}</strong></p>
+        <button @click="newTransaction"
+          class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-xl transition">
+          + New Transaction
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Scanner Modal ════════════════════════════════════════════════════ -->
+  <ScannerModal v-if="showScanner" :show="showScanner" mode="staff" title="Scan Prescription"
+    @update:show="showScanner=$event" @ocr-done="onOcrDone" />
+
+</div>`,
 });

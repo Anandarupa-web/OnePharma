@@ -204,6 +204,17 @@ export const saveCarts          = (d) => localStorage.setItem('op_carts', JSON.s
 export const getOrders          = () => JSON.parse(localStorage.getItem('op_orders')       || '[]');
 export const saveOrders         = (d) => localStorage.setItem('op_orders', JSON.stringify(d));
 
+/** Dosage slip write helper (read helper already above). */
+export const saveDosageSlips    = (d) => localStorage.setItem('op_dosage_slips', JSON.stringify(d));
+
+/** Doctor / prescriber helpers (staff POS). */
+export const getDoctors         = () => JSON.parse(localStorage.getItem('op_doctors')           || '[]');
+export const saveDoctors        = (d) => localStorage.setItem('op_doctors', JSON.stringify(d));
+
+/** Medicine-request helpers – staff POS sends new medicines for admin approval. */
+export const getMedicineRequests  = () => JSON.parse(localStorage.getItem('op_medicine_requests') || '[]');
+export const saveMedicineRequests = (d) => localStorage.setItem('op_medicine_requests', JSON.stringify(d));
+
 /** Patient session – stored separately from staff auth (op_auth). Password never written here. */
 export const getPatientAuth     = () => JSON.parse(localStorage.getItem('op_patient_auth') || 'null');
 export const savePatientAuth    = (p) => {
