@@ -1,26 +1,22 @@
 /**
  * PatientHome.js – Patient Portal (full feature set)
  *
- * Guest tabs (5):      Home | Find | Pharmacies | Scan Rx | Login
- * Logged-in tabs (5):  Home | Find | Cart       | Scan Rx | Me
+ * Architecture:
+ *  – Injects `patientBridge` from root App for shared state with Navbar.
+ *  – All patient auth, cart, and order logic lives here; bridge is kept in sync.
  *
- * Guest features:
- *  1. Hero carousel + medicine categories + featured medicines
- *  2. Global cross-pharmacy search (available/not-available – no qty shown)
- *  3. Pharmacy browser with inventory drill-down (no qty shown)
- *  4. Prescription scanner
+ * Responsive layout:
+ *  – Mobile (<md): sticky bottom nav with 5 tabs; chatbot FAB above it.
+ *  – Desktop (≥md): no bottom nav; top Navbar handles search + cart + account.
  *
- * Logged-in patient features (+ above):
- *  5. Add to Cart on any available medicine
- *  6. Cart management – up to 3 simultaneous carts, one per pharmacy
- *  7. Order placement → QR code for in-store pickup
- *  8. AI medicine chatbot (PharmAI)
- *  9. Profile with order history and mobile phone verification
- *
- * Auth: patient login/register modal + simulated OTP phone verification.
- * Session stored in op_patient_auth (separate from staff op_auth).
+ * Fix log (vs previous version):
+ *  1. Carousel: slides are position:absolute inside fixed-height container → no layout shift.
+ *  2. Portal tabs removed (handled in Navbar / URL hash routing).
+ *  3. AI Chatbot: floating FAB in bottom-right → full-screen mobile / anchored desktop panel.
+ *  4. Me section: app-like "My Account" list with avatar header and row items.
+ *  5. Desktop: no bottom nav; better grid layouts; desktop search in top Navbar.
  */
-import { defineComponent, ref, computed, reactive, watch, onMounted, onUnmounted } from 'vue';
+import { defineComponent, ref, computed, reactive, watch, onMounted, onUnmounted, inject, nextTick } from 'vue';
 import ScannerModal from '../components/ScannerModal.js';
 import {
   getInventory, getPharmacies, getPharmacyInv,
@@ -35,29 +31,29 @@ const CHAT_KB = [
   { p: ['hello','hi','hey','namaste','start'], r: "Hello! 👋 I'm PharmAI, your personal medicine assistant.\n\nI can help with:\n• Medicine info & uses\n• Side effects & dosage\n• Finding medicines near you\n• Cart & QR order system\n\nJust type your question!" },
   { p: ['paracetamol','crocin','fever','headache'], r: "💊 Paracetamol (Crocin)\nUses: Fever, headache, mild pain\nDose: 1 tablet (500 mg) every 4–6 hrs\nMax: 4 tablets per day\n⚠️ Avoid alcohol. Don't exceed recommended dose." },
   { p: ['amoxicillin','mox','antibiotic','infection','bacterial'], r: "💊 Amoxicillin (Mox)\nUses: Bacterial infections (ear, throat, UTI)\nDose: As prescribed\n⚠️ Complete the full course. Report allergic reactions immediately." },
-  { p: ['metformin','glycomet','diabetes','blood sugar','diabetic'], r: "💊 Metformin (Glycomet)\nUses: Type 2 Diabetes management\nDose: With meals, as prescribed\n⚠️ Monitor blood sugar. Report muscle pain or nausea to your doctor." },
-  { p: ['cetirizine','zyrtec','allergy','sneezing','itching','antihistamine'], r: "💊 Cetirizine (Zyrtec)\nUses: Allergies, hay fever, hives\nDose: 1 tablet (10 mg) once daily, preferably at night\n⚠️ May cause drowsiness — avoid driving." },
-  { p: ['ibuprofen','brufen','pain','inflammation','nsaid'], r: "💊 Ibuprofen (Brufen)\nUses: Pain, inflammation, fever\nDose: 1 tablet (400 mg) every 6–8 hrs WITH food\n⚠️ Avoid if you have stomach ulcers or kidney issues." },
+  { p: ['metformin','glycomet','diabetes','blood sugar','diabetic'], r: "💊 Metformin (Glycomet)\nUses: Type 2 Diabetes\nDose: With meals, as prescribed\n⚠️ Monitor blood sugar. Report muscle pain or nausea to your doctor." },
+  { p: ['cetirizine','zyrtec','allergy','sneezing','itching','antihistamine'], r: "💊 Cetirizine (Zyrtec)\nUses: Allergies, hay fever, hives\nDose: 1 tablet (10 mg) once daily at night\n⚠️ May cause drowsiness — avoid driving." },
+  { p: ['ibuprofen','brufen','pain','inflammation','nsaid'], r: "💊 Ibuprofen (Brufen)\nUses: Pain, inflammation, fever\nDose: 400 mg every 6–8 hrs WITH food\n⚠️ Avoid if you have stomach ulcers or kidney issues." },
   { p: ['omeprazole','omez','acidity','acid reflux','gastric','antacid'], r: "💊 Omeprazole (Omez)\nUses: Acidity, GERD, stomach ulcers\nDose: 1 capsule (20 mg) before breakfast\n⚠️ Long-term use requires medical supervision." },
-  { p: ['vitamin d','vitamin d3','d-rise','bone','cholecalciferol'], r: "💊 Vitamin D3 (D-Rise)\nUses: Vitamin D deficiency, bone health, immunity\nDose: 1000–2000 IU daily with a fatty meal\n✅ Generally well-tolerated at prescribed doses." },
+  { p: ['vitamin d','vitamin d3','d-rise','bone','cholecalciferol'], r: "💊 Vitamin D3 (D-Rise)\nUses: Vitamin D deficiency, bone health\nDose: 1000–2000 IU daily with a fatty meal\n✅ Generally well-tolerated at prescribed doses." },
   { p: ['amlodipine','amlovas','blood pressure','bp','hypertension'], r: "💊 Amlodipine (Amlovas)\nUses: High blood pressure, angina\nDose: 5–10 mg once daily\n⚠️ Do not stop suddenly. May cause ankle swelling." },
   { p: ['losartan','repace'], r: "💊 Losartan (Repace)\nUses: Hypertension, heart failure\nDose: 25–100 mg once daily\n⚠️ Avoid potassium supplements unless prescribed." },
-  { p: ['side effect','side effects','adverse','reaction'], r: "⚠️ Side effects vary by medicine:\n• Antibiotics → nausea, diarrhoea\n• NSAIDs → stomach upset\n• Antihistamines → drowsiness\n• BP medicines → dizziness\n\nAsk about a specific medicine for details!" },
+  { p: ['side effect','side effects','adverse','reaction'], r: "⚠️ Side effects vary by medicine:\n• Antibiotics → nausea, diarrhoea\n• NSAIDs → stomach upset\n• Antihistamines → drowsiness\n• BP meds → dizziness\n\nAsk about a specific medicine for details!" },
   { p: ['dosage','dose','how to take','when to take','timing'], r: "📋 General timing:\n• Before meals: antacids, thyroid meds\n• With meals: metformin, NSAIDs, antibiotics\n• At bedtime: antihistamines, statins\n\nAlways follow your doctor's instructions!" },
   { p: ['price','cost','how much','expensive'], r: "💰 Prices vary by pharmacy. In the Find tab, search a medicine to compare prices at each nearby pharmacy. Generics are often significantly cheaper!" },
-  { p: ['available','availability','stock','find','search'], r: "🔍 To check availability:\n1. Tap Find at the bottom\n2. Type the medicine name or category\n3. See which nearby pharmacies carry it\n\nAlso browse a specific pharmacy under Find → Pharmacies!" },
-  { p: ['cart','add to cart','order','qr','pickup','buy'], r: "🛒 To order medicines:\n1. Find a medicine → tap + Cart\n2. You can have up to 3 carts (one per pharmacy)\n3. Go to Cart tab → review items\n4. Tap Place Order → get a QR code 📱\n5. Show QR at the pharmacy counter for quick pickup!" },
-  { p: ['pharmacy','pharmacies','near','nearby','location','store'], r: "📍 Nearby pharmacies:\n• Saha Pharmacy – 0.3 km ✅ Open\n• MedPlus – 1.1 km ✅ Open\n• Apollo Pharmacy – 2.0 km ❌ Closed\n• LifeCare Pharmacy – 3.5 km ✅ Open\n\nBrowse them in Find → Pharmacies!" },
-  { p: ['prescription','rx','scan','upload'], r: "📷 Scanning a prescription:\n1. Tap Scan Rx in the bottom nav\n2. Photograph or upload your prescription\n3. AI extracts medicine names automatically\n4. Check availability near you instantly!" },
+  { p: ['available','availability','stock','find','search'], r: "🔍 To check availability:\n1. Use the Search tab or top search bar\n2. Type the medicine name or category\n3. See which nearby pharmacies carry it\n\nAlso browse a specific pharmacy under Find → Pharmacies!" },
+  { p: ['cart','add to cart','order','qr','pickup','buy'], r: "🛒 To order medicines:\n1. Find a medicine → tap + Cart\n2. Up to 3 carts (one per pharmacy)\n3. Go to Cart → review items\n4. Tap Place Order → get a QR code 📱\n5. Show QR at the pharmacy counter for quick pickup!" },
+  { p: ['pharmacy','pharmacies','near','nearby','location','store'], r: "�� Nearby pharmacies:\n• Saha Pharmacy – 0.3 km ✅ Open\n• MedPlus – 1.1 km ✅ Open\n• Apollo Pharmacy – 2.0 km ❌ Closed\n• LifeCare Pharmacy – 3.5 km ✅ Open\n\nBrowse them in Find → Pharmacies!" },
+  { p: ['prescription','rx','scan','upload'], r: "📷 Scanning a prescription:\n1. Tap the 📷 Scan Rx button in the nav\n2. Photograph or upload your prescription\n3. AI extracts medicine names automatically\n4. Check availability near you instantly!" },
   { p: ['generic','brand','alternative','cheaper'], r: "💡 Generic medicines contain the same active ingredient as brand-name drugs but cost much less. Ask your pharmacist about generic alternatives!" },
   { p: ['thank','thanks','bye','goodbye','ok','okay'], r: "😊 You're welcome! Stay healthy and feel free to ask anytime. 💚" },
 ];
 
-// ── Homepage data ───────────────────────────────────────────────────────────
+// ── Homepage carousel slides ────────────────────────────────────────────────
 const HERO_SLIDES = [
-  { bg: 'bg-gradient-to-br from-green-600 to-emerald-700', icon: '💊', title: 'Your Medicines, Nearby',      sub: 'Search availability at all pharmacies within 5 km — instantly.',           cta: 'find'    },
-  { bg: 'bg-gradient-to-br from-teal-600 to-cyan-700',     icon: '📋', title: 'Scan Your Prescription',     sub: 'Upload or photograph your Rx and let AI read it for you.',                cta: 'scanner' },
-  { bg: 'bg-gradient-to-br from-blue-600 to-indigo-700',   icon: '🛒', title: 'Order Ahead, Skip the Wait', sub: 'Build a cart, get a QR code, and collect at the counter.',               cta: 'cart'    },
+  { bg: 'bg-gradient-to-br from-green-600 to-emerald-700', icon: '💊', title: 'Your Medicines, Nearby',      sub: 'Search availability at all pharmacies within 5 km — instantly.',         cta: 'find'    },
+  { bg: 'bg-gradient-to-br from-teal-600 to-cyan-700',     icon: '📋', title: 'Scan Your Prescription',     sub: 'Upload or photograph your Rx and let AI read it for you.',              cta: 'scanner' },
+  { bg: 'bg-gradient-to-br from-blue-600 to-indigo-700',   icon: '🛒', title: 'Order Ahead, Skip the Wait', sub: 'Build a cart, get a QR code, and collect at the counter.',             cta: 'cart'    },
 ];
 
 const CATEGORIES = [
@@ -71,8 +67,11 @@ const CATEGORIES = [
   { id: 'Bronchodilator',   icon: '🫁', label: 'Respiratory'   },
 ];
 
-/** Carousel auto-advance delay in milliseconds. */
+/** Carousel auto-advance delay in ms. */
 const CAROUSEL_INTERVAL_MS = 4500;
+
+/** Fixed height (px) of the hero carousel container. Using a constant prevents magic numbers and ensures the absolute-positioned slide pattern stays consistent. */
+const CAROUSEL_HEIGHT_PX = 210;
 
 export default defineComponent({
   name: 'PatientHome',
@@ -80,13 +79,19 @@ export default defineComponent({
 
   setup() {
 
-    // ── Patient auth ──────────────────────────────────────────────────────────
-    const patientUser   = ref(getPatientAuth());
+    // ── Inject shared bridge from root App ────────────────────────────────────
+    const patientBridge = inject('patientBridge');
+
+    // ── Patient auth state  (kept locally; synced ONE-WAY to bridge) ──────────
+    const patientUser   = ref(patientBridge.user);
     const showAuthModal = ref(false);
     const authMode      = ref('login');
     const authForm      = reactive({ name: '', phone: '', password: '' });
     const authError     = ref('');
     const authLoading   = ref(false);
+
+    // Keep bridge.user in sync whenever local patientUser changes
+    watch(patientUser, (u) => { patientBridge.user = u; }, { deep: true });
 
     // ── Phone verification ────────────────────────────────────────────────────
     const showVerifyModal = ref(false);
@@ -96,8 +101,28 @@ export default defineComponent({
     const pendingCartAdd  = ref(null);
 
     // ── Core UI state ─────────────────────────────────────────────────────────
-    const activeTab   = ref('home');
+    const activeTab   = ref(patientBridge.activeTab || 'home');
     const showScanner = ref(false);
+
+    // Two-way sync: bridge.activeTab ↔ local activeTab
+    watch(() => patientBridge.activeTab, (tab) => {
+      if (tab === 'login') { openAuthModal('login'); patientBridge.activeTab = 'home'; return; }
+      if (tab && tab !== activeTab.value) activeTab.value = tab;
+    });
+    watch(activeTab, (tab) => { patientBridge.activeTab = tab; });
+
+    // Sync bridge.showScanner
+    watch(() => patientBridge.showScanner, (v) => {
+      if (v) { showScanner.value = true; patientBridge.showScanner = false; }
+    });
+
+    // Desktop search: bridge.searchQuery → local globalQuery
+    watch(() => patientBridge.searchQuery, (q) => {
+      if (q !== undefined) {
+        globalQuery.value = q;
+        if (q) { findSubView.value = 'search'; activeTab.value = 'find'; }
+      }
+    });
 
     // ── Hero carousel ─────────────────────────────────────────────────────────
     const currentSlide = ref(0);
@@ -122,15 +147,23 @@ export default defineComponent({
     const viewingOrder  = ref(null);
     const qrImageUrl    = ref('');
 
-    // ── Me sub-view ───────────────────────────────────────────────────────────
-    const meSubView = ref('profile');
+    // Sync cart count to bridge whenever it changes
+    const cartItemCount = computed(() =>
+      patientCarts.value.reduce((s, c) => s + c.items.length, 0)
+    );
+    watch(cartItemCount, (n) => { patientBridge.cartCount = n; });
 
-    // ── Chatbot ───────────────────────────────────────────────────────────────
+    // ── Me sub-view ───────────────────────────────────────────────────────────
+    const meSubView = ref('list');  // 'list' | 'orders' | 'dosage'
+
+    // ── AI Chatbot (floating panel) ───────────────────────────────────────────
+    const showChat    = ref(false);
     const chatMessages = ref([
       { id: 1, from: 'bot', text: "Hello! 👋 I'm PharmAI.\nAsk me anything about medicines, dosages, side effects, or how the cart works!" },
     ]);
     const chatInput  = ref('');
     const chatTyping = ref(false);
+    const chatListEl = ref(null);
 
     // ── Dosage / appointments ─────────────────────────────────────────────────
     const dosageSlips   = ref(getDosageSlips());
@@ -143,13 +176,14 @@ export default defineComponent({
 
     // ── Computed ──────────────────────────────────────────────────────────────
 
+    /** Mobile bottom-nav tabs (hidden on desktop). */
     const tabs = computed(() => patientUser.value
       ? [
           { id: 'home',    icon: '🏠', label: 'Home'    },
           { id: 'find',    icon: '🔍', label: 'Find'    },
           { id: 'cart',    icon: '🛒', label: 'Cart'    },
           { id: 'scanner', icon: '📷', label: 'Scan Rx' },
-          { id: 'me',      icon: '👤', label: 'Me'      },
+          { id: 'me',      icon: '👤', label: 'Account' },
         ]
       : [
           { id: 'home',       icon: '🏠', label: 'Home'    },
@@ -158,10 +192,6 @@ export default defineComponent({
           { id: 'scanner',    icon: '📷', label: 'Scan Rx' },
           { id: 'login',      icon: '👤', label: 'Login'   },
         ]
-    );
-
-    const cartItemCount = computed(() =>
-      patientCarts.value.reduce((s, c) => s + c.items.length, 0)
     );
 
     const globalResults = computed(() => {
@@ -177,14 +207,7 @@ export default defineComponent({
         .map(m => {
           const availability = pharmacies.value.map(ph => {
             const entry = (pharmacyInv.value[ph.id] || {})[m.id];
-            return {
-              pharmacyId:   ph.id,
-              pharmacyName: ph.name,
-              distance:     ph.distance,
-              open:         ph.open,
-              inStock:      entry ? entry.s > 0 : false,
-              price:        entry ? entry.p : m.price,
-            };
+            return { pharmacyId: ph.id, pharmacyName: ph.name, distance: ph.distance, open: ph.open, inStock: entry ? entry.s > 0 : false, price: entry ? entry.p : m.price };
           });
           return { ...m, availability };
         });
@@ -195,11 +218,7 @@ export default defineComponent({
       const phInv = pharmacyInv.value[selectedPharmacy.value.id] || {};
       const q = pharmacySearchQuery.value.trim().toLowerCase();
       return inventory.value
-        .filter(m => !q ||
-          m.name.toLowerCase().includes(q) ||
-          m.brand.toLowerCase().includes(q) ||
-          m.generic.toLowerCase().includes(q)
-        )
+        .filter(m => !q || m.name.toLowerCase().includes(q) || m.brand.toLowerCase().includes(q) || m.generic.toLowerCase().includes(q))
         .map(m => {
           const entry = phInv[m.id];
           return { ...m, inStock: entry ? entry.s > 0 : false, localPrice: entry ? entry.p : m.price };
@@ -229,12 +248,8 @@ export default defineComponent({
         authLoading.value = false;
         const patients = getPatients();
         // ⚠️  SECURITY NOTE (Phase 1 demo only):
-        //   Passwords are stored and compared in plain text in localStorage solely
-        //   to enable a fully client-side prototype with no server dependency.
-        //   This MUST NOT be used in production. Phase 2 will replace this with
-        //   a POST /api/auth/login that compares bcrypt-hashed passwords server-side
-        //   and returns a short-lived signed JWT. Passwords will never be stored
-        //   unhashed or transmitted in plain text in Phase 2+.
+        //   Passwords stored and compared in plain text in localStorage for a
+        //   client-side prototype. Phase 2 → bcrypt server-side + JWT.
         const patient = patients.find(p => p.phone === authForm.phone.trim() && p.password === authForm.password);
         if (!patient) { authError.value = 'Invalid phone number or password.'; return; }
         savePatientAuth(patient);
@@ -255,13 +270,9 @@ export default defineComponent({
         authLoading.value = false;
         const patients = getPatients();
         if (patients.find(p => p.phone === authForm.phone.trim())) { authError.value = 'Phone number already registered. Please log in.'; return; }
-        // ⚠️  SECURITY NOTE (Phase 1 demo only):
-        //   Password stored as plain text in localStorage for a client-only prototype.
-        //   Phase 2 will hash passwords with bcrypt server-side before storage.
-        const newPt = {
-          id: Date.now(), name: authForm.name.trim(), phone: authForm.phone.trim(),
-          phoneVerified: false, password: authForm.password, createdAt: today,
-        };
+        // ⚠️  SECURITY NOTE (Phase 1 demo only): plain-text password storage.
+        //   Phase 2 → bcrypt hash before storage.
+        const newPt = { id: Date.now(), name: authForm.name.trim(), phone: authForm.phone.trim(), phoneVerified: false, password: authForm.password, createdAt: today };
         patients.push(newPt);
         savePatients(patients);
         savePatientAuth(newPt);
@@ -286,7 +297,7 @@ export default defineComponent({
     const startVerify = () => {
       verifyError.value     = '';
       verifyOtpInput.value  = '';
-      // Use crypto.getRandomValues for a better-quality random OTP even in demo mode.
+      // crypto.getRandomValues for better OTP randomness even in demo mode
       const buf = new Uint32Array(1);
       crypto.getRandomValues(buf);
       generatedOtp.value    = String(100000 + (buf[0] % 900000));
@@ -295,10 +306,7 @@ export default defineComponent({
 
     const confirmOtp = () => {
       verifyError.value = '';
-      if (verifyOtpInput.value.trim() !== generatedOtp.value) {
-        verifyError.value = 'Incorrect OTP. Please try again.';
-        return;
-      }
+      if (verifyOtpInput.value.trim() !== generatedOtp.value) { verifyError.value = 'Incorrect OTP. Please try again.'; return; }
       const patients = getPatients();
       const idx = patients.findIndex(p => p.id === patientUser.value.id);
       if (idx !== -1) { patients[idx].phoneVerified = true; savePatients(patients); }
@@ -316,12 +324,8 @@ export default defineComponent({
     // ── Cart methods ──────────────────────────────────────────────────────────
 
     const initiateAddToCart = (med, pharmacyId, pharmacyName, price) => {
-      if (!patientUser.value)                { openAuthModal('login'); return; }
-      if (!patientUser.value.phoneVerified)  {
-        pendingCartAdd.value = { med, pharmacyId, pharmacyName, price };
-        startVerify();
-        return;
-      }
+      if (!patientUser.value)               { openAuthModal('login'); return; }
+      if (!patientUser.value.phoneVerified) { pendingCartAdd.value = { med, pharmacyId, pharmacyName, price }; startVerify(); return; }
       addItemToCart(med, pharmacyId, pharmacyName, price);
     };
 
@@ -330,7 +334,6 @@ export default defineComponent({
       const allCarts       = getCarts();
       const myCartForPharm = allCarts.find(c => c.patientId === patientUser.value.id && c.pharmacyId === pharmacyId);
       const myTotal        = allCarts.filter(c => c.patientId === patientUser.value.id).length;
-
       if (!myCartForPharm && myTotal >= 3) {
         cartError.value = 'You already have 3 active carts. Place an order from an existing cart first.';
         activeTab.value = 'cart';
@@ -339,15 +342,10 @@ export default defineComponent({
       }
       if (myCartForPharm) {
         const item = myCartForPharm.items.find(i => i.medId === med.id);
-        if (item) { item.qty += 1; }
-        else       { myCartForPharm.items.push({ medId: med.id, medName: med.name, price, qty: 1 }); }
+        if (item) item.qty += 1;
+        else myCartForPharm.items.push({ medId: med.id, medName: med.name, price, qty: 1 });
       } else {
-        allCarts.push({
-          id: 'cart_' + Date.now(),
-          patientId: patientUser.value.id, pharmacyId, pharmacyName,
-          items: [{ medId: med.id, medName: med.name, price, qty: 1 }],
-          createdAt: new Date().toISOString(),
-        });
+        allCarts.push({ id: 'cart_' + Date.now(), patientId: patientUser.value.id, pharmacyId, pharmacyName, items: [{ medId: med.id, medName: med.name, price, qty: 1 }], createdAt: new Date().toISOString() });
       }
       saveCarts(allCarts);
       patientCarts.value = allCarts.filter(c => c.patientId === patientUser.value.id);
@@ -369,12 +367,11 @@ export default defineComponent({
     };
 
     const deleteCart = (cartId) => {
-      const allCarts = getCarts().filter(c => c.id !== cartId);
-      saveCarts(allCarts);
-      patientCarts.value = allCarts.filter(c => c.patientId === patientUser.value.id);
+      saveCarts(getCarts().filter(c => c.id !== cartId));
+      patientCarts.value = getCarts().filter(c => c.patientId === patientUser.value.id);
     };
 
-    // ── Order / QR methods ────────────────────────────────────────────────────
+    // ── Order / QR ────────────────────────────────────────────────────────────
 
     const placeOrder = async (cart) => {
       const orderId  = 'ORD-' + Date.now().toString(36).toUpperCase().slice(-7);
@@ -398,16 +395,18 @@ export default defineComponent({
       qrImageUrl.value   = '';
       if (typeof window.QRCode !== 'undefined') {
         try {
-          const url = await window.QRCode.toDataURL('OP:' + order.id, {
-            width: 240, margin: 2,
-            color: { dark: '#166534', light: '#f0fdf4' },
-          });
-          qrImageUrl.value = url;
+          qrImageUrl.value = await window.QRCode.toDataURL('OP:' + order.id, { width: 240, margin: 2, color: { dark: '#166534', light: '#f0fdf4' } });
         } catch (e) { /* text fallback */ }
       }
     };
 
-    // ── Chat methods ──────────────────────────────────────────────────────────
+    // ── Chat ──────────────────────────────────────────────────────────────────
+
+    const scrollChatToBottom = () => {
+      nextTick(() => {
+        if (chatListEl.value) chatListEl.value.scrollTop = chatListEl.value.scrollHeight;
+      });
+    };
 
     const sendChat = () => {
       const msg = chatInput.value.trim();
@@ -415,14 +414,14 @@ export default defineComponent({
       chatMessages.value.push({ id: Date.now(), from: 'user', text: msg });
       chatInput.value = '';
       chatTyping.value = true;
+      scrollChatToBottom();
       const lower = msg.toLowerCase();
       let response = "I'm not sure about that. Try asking about a specific medicine, side effects, or how to find medicines near you! 😊";
-      for (const entry of CHAT_KB) {
-        if (entry.p.some(kw => lower.includes(kw))) { response = entry.r; break; }
-      }
+      for (const entry of CHAT_KB) { if (entry.p.some(kw => lower.includes(kw))) { response = entry.r; break; } }
       setTimeout(() => {
         chatTyping.value = false;
         chatMessages.value.push({ id: Date.now() + 1, from: 'bot', text: response });
+        scrollChatToBottom();
       }, 900 + Math.random() * 600);
     };
 
@@ -435,19 +434,15 @@ export default defineComponent({
     const getInitials = (name) =>
       (name || '').split(' ').filter(w => w.length > 0).map(w => w[0]).join('').slice(0, 2).toUpperCase() || '??';
 
-    /** Handles the CTA button click on each hero slide. */
+    /** Handles CTA button click on each hero slide. */
     const handleSlideAction = (slide) => {
       if (slide.cta === 'scanner') { showScanner.value = true; return; }
-      if (slide.cta === 'cart') {
-        patientUser.value ? (activeTab.value = 'cart') : openAuthModal('register');
-        return;
-      }
-      // default: 'find'
+      if (slide.cta === 'cart') { patientUser.value ? (activeTab.value = 'cart') : openAuthModal('register'); return; }
       activeTab.value   = 'find';
       findSubView.value = 'search';
     };
 
-    /** Label for the hero-slide CTA button (reactive on patientUser). */
+    /** Label for the hero-slide CTA button. */
     const slideCta = (slide) => {
       if (slide.cta === 'scanner') return 'Scan Now →';
       if (slide.cta === 'cart')    return patientUser.value ? 'View Cart →' : 'Create Account →';
@@ -463,6 +458,8 @@ export default defineComponent({
 
     const searchCategory = (catId) => {
       globalQuery.value = catId;
+      // Also sync desktop search bar via bridge
+      patientBridge.searchQuery = catId;
       findSubView.value = 'search';
       activeTab.value   = 'find';
     };
@@ -493,7 +490,7 @@ export default defineComponent({
       openAuthModal, loginPatient, registerPatient, logoutPatient,
       showVerifyModal, verifyOtpInput, generatedOtp, verifyError, confirmOtp, startVerify,
       tabs, activeTab, showScanner, handleTabClick,
-      currentSlide, HERO_SLIDES, CATEGORIES, featuredMedicines, searchCategory,
+      currentSlide, HERO_SLIDES, CATEGORIES, CAROUSEL_HEIGHT_PX, featuredMedicines, searchCategory,
       handleSlideAction, slideCta, getInitials,
       findSubView, globalQuery, globalResults,
       selectedPharmacy, pharmacySearchQuery, pharmacyInventory, pharmacies, stars,
@@ -501,13 +498,13 @@ export default defineComponent({
       initiateAddToCart, updateQty, deleteCart, placeOrder,
       viewingOrder, qrImageUrl, openOrderQR,
       meSubView, patientOrders,
-      chatMessages, chatInput, chatTyping, sendChat,
+      showChat, chatMessages, chatInput, chatTyping, chatListEl, sendChat,
       dosageSlips, slots, bookedSlotMsg, selectedDate, minDate, maxDate, bookSlot, onDateChange,
     };
   },
 
   template: `
-    <div class="flex flex-col min-h-[calc(100vh-3.5rem)] bg-gray-50 pb-20">
+    <div class="flex flex-col min-h-[calc(100vh-3.5rem)] bg-gray-50 pb-16 md:pb-0">
 
       <!-- ════ PATIENT AUTH MODAL ════ -->
       <Transition name="fade">
@@ -609,10 +606,7 @@ export default defineComponent({
             <div class="flex flex-col items-center bg-green-50 rounded-2xl p-4 mb-4">
               <img v-if="qrImageUrl" :src="qrImageUrl" alt="Order QR Code" class="w-48 h-48 rounded-xl" />
               <div v-else class="w-48 h-48 bg-white rounded-xl border-2 border-dashed border-green-300 flex items-center justify-center text-center p-3">
-                <div>
-                  <div class="text-4xl mb-2">📱</div>
-                  <p class="text-xs font-bold text-green-800 break-all">{{ viewingOrder.id }}</p>
-                </div>
+                <div><div class="text-4xl mb-2">📱</div><p class="text-xs font-bold text-green-800 break-all">{{ viewingOrder.id }}</p></div>
               </div>
               <p class="text-xs font-bold text-green-700 mt-3 tracking-widest">{{ viewingOrder.id }}</p>
             </div>
@@ -628,6 +622,49 @@ export default defineComponent({
               </div>
             </div>
             <p class="text-[11px] text-gray-400 text-center">📍 Collect at <strong>{{ viewingOrder.pharmacyName }}</strong>. Valid for 24 hours.</p>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- ════ FLOATING PHARMAI CHATBOT PANEL ════ -->
+      <Transition name="fade">
+        <div v-if="showChat"
+          class="fixed inset-0 md:inset-auto md:bottom-20 md:right-4 md:w-96 md:h-[500px] z-50 flex flex-col bg-white md:rounded-2xl md:shadow-2xl md:border md:border-gray-200 overflow-hidden"
+          style="box-shadow: 0 25px 60px rgba(0,0,0,0.2);">
+          <!-- Chat header -->
+          <div class="bg-green-600 text-white px-4 py-3 flex items-center justify-between shrink-0">
+            <div class="flex items-center gap-2">
+              <span class="text-xl">🤖</span>
+              <div>
+                <p class="font-bold text-sm">PharmAI – Medicine Assistant</p>
+                <p class="text-[10px] text-green-100">Ask about medicines, dosage, side effects</p>
+              </div>
+            </div>
+            <button @click="showChat = false" class="text-white/70 hover:text-white text-2xl leading-none">&times;</button>
+          </div>
+          <!-- Messages -->
+          <div ref="chatListEl" class="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50">
+            <div v-for="msg in chatMessages" :key="msg.id" :class="['flex', msg.from === 'user' ? 'justify-end' : 'justify-start gap-2']">
+              <div v-if="msg.from === 'bot'" class="w-7 h-7 rounded-full bg-green-100 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">🤖</div>
+              <div :class="['max-w-[80%] px-3 py-2 rounded-2xl text-sm whitespace-pre-line', msg.from === 'user' ? 'bg-green-600 text-white rounded-br-sm' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm']">
+                {{ msg.text }}
+              </div>
+            </div>
+            <div v-if="chatTyping" class="flex justify-start gap-2">
+              <div class="w-7 h-7 rounded-full bg-green-100 text-xs flex items-center justify-center shrink-0">🤖</div>
+              <div class="bg-white border border-gray-200 px-3 py-2.5 rounded-2xl rounded-bl-sm shadow-sm">
+                <div class="dot-pulse text-green-600"><span></span><span></span><span></span></div>
+              </div>
+            </div>
+          </div>
+          <!-- Input -->
+          <div class="border-t border-gray-200 p-3 flex gap-2 shrink-0 bg-white">
+            <input v-model="chatInput" type="text" placeholder="Ask about a medicine…" @keyup.enter="sendChat"
+              class="flex-1 border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" />
+            <button @click="sendChat" :disabled="!chatInput.trim()"
+              class="bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white font-bold px-4 rounded-xl text-sm transition">
+              →
+            </button>
           </div>
         </div>
       </Transition>
@@ -651,34 +688,34 @@ export default defineComponent({
       <!-- ════ TAB: HOME ════ -->
       <section v-if="activeTab === 'home'" class="w-full">
 
-        <!-- Hero carousel -->
-        <div class="relative overflow-hidden min-h-[160px]">
-          <div v-for="(slide, idx) in HERO_SLIDES" :key="idx">
+        <!-- ── Hero Carousel (fixed-height, absolutely-positioned slides → no layout shift) ── -->
+        <div class="relative overflow-hidden" :style="{ height: CAROUSEL_HEIGHT_PX + 'px' }">
+          <template v-for="(slide, idx) in HERO_SLIDES" :key="idx">
             <Transition name="fade">
-              <div v-if="currentSlide === idx" :class="[slide.bg, 'text-white px-5 pt-8 pb-10']">
-                <div class="max-w-lg mx-auto flex items-center gap-4">
+              <div v-if="currentSlide === idx"
+                :class="['absolute inset-0', slide.bg, 'text-white px-5 pt-8 pb-6']">
+                <div class="max-w-lg mx-auto flex items-center gap-4 h-full">
                   <div class="text-6xl shrink-0 drop-shadow-lg">{{ slide.icon }}</div>
                   <div class="flex-1">
                     <h1 class="text-xl font-extrabold leading-tight">{{ slide.title }}</h1>
                     <p class="text-sm text-white/80 mt-1">{{ slide.sub }}</p>
-                    <button
-                      @click="handleSlideAction(slide)"
-                      class="mt-3 bg-white/25 hover:bg-white/35 backdrop-blur text-white text-sm font-bold px-5 py-1.5 rounded-full transition border border-white/30">
+                    <button @click="handleSlideAction(slide)"
+                      class="mt-3 bg-white/25 hover:bg-white/35 text-white text-sm font-bold px-5 py-1.5 rounded-full transition border border-white/30">
                       {{ slideCta(slide) }}
                     </button>
                   </div>
                 </div>
               </div>
             </Transition>
-          </div>
+          </template>
           <!-- Slide dots -->
-          <div class="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
+          <div class="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
             <button v-for="(_, idx) in HERO_SLIDES" :key="idx" @click="currentSlide = idx"
               :class="['w-2 h-2 rounded-full transition', currentSlide === idx ? 'bg-white' : 'bg-white/40']" />
           </div>
         </div>
 
-        <!-- Verify nudge for unverified patients -->
+        <!-- Verify nudge -->
         <div v-if="patientUser && !patientUser.phoneVerified"
           class="mx-4 mt-4 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex items-center gap-3 cursor-pointer"
           @click="startVerify()">
@@ -690,7 +727,7 @@ export default defineComponent({
           <span class="text-amber-600 font-bold text-sm shrink-0">Verify →</span>
         </div>
 
-        <!-- Logged-out nudge -->
+        <!-- Login nudge (guest only) -->
         <div v-if="!patientUser"
           class="mx-4 mt-4 bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 flex items-center gap-3 cursor-pointer"
           @click="openAuthModal('login')">
@@ -702,10 +739,10 @@ export default defineComponent({
           <span class="text-blue-600 font-bold text-sm shrink-0">Login →</span>
         </div>
 
-        <!-- Medicine categories grid -->
-        <div class="px-4 mt-5">
+        <!-- Categories grid: 4 cols mobile → 8 cols desktop -->
+        <div class="px-4 mt-5 max-w-5xl mx-auto">
           <h2 class="text-base font-bold text-gray-900 mb-3">Browse by Category</h2>
-          <div class="grid grid-cols-4 gap-2">
+          <div class="grid grid-cols-4 md:grid-cols-8 gap-2">
             <button v-for="cat in CATEGORIES" :key="cat.id" @click="searchCategory(cat.id)"
               class="bg-white border border-gray-200 rounded-2xl p-3 flex flex-col items-center gap-1.5 shadow-sm hover:border-green-400 hover:shadow-md active:scale-95 transition">
               <span class="text-2xl">{{ cat.icon }}</span>
@@ -714,14 +751,14 @@ export default defineComponent({
           </div>
         </div>
 
-        <!-- Featured / popular medicines -->
-        <div class="px-4 mt-5 pb-4">
+        <!-- Popular medicines: 2 cols mobile → 3 cols desktop -->
+        <div class="px-4 mt-5 pb-6 max-w-5xl mx-auto">
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-base font-bold text-gray-900">Popular Medicines</h2>
             <button @click="globalQuery = ''; findSubView = 'search'; activeTab = 'find'"
               class="text-xs text-green-600 font-medium hover:text-green-700">See all →</button>
           </div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div v-for="med in featuredMedicines" :key="med.id"
               class="bg-white border border-gray-200 rounded-2xl p-3 shadow-sm hover:shadow-md transition">
               <div class="flex items-start justify-between gap-1 mb-1.5">
@@ -742,8 +779,8 @@ export default defineComponent({
       </section>
 
 
-      <!-- ════ TAB: FIND (search + pharmacies sub-view) ════ -->
-      <section v-if="activeTab === 'find'" class="max-w-2xl mx-auto w-full px-4 pt-4">
+      <!-- ════ TAB: FIND ════ -->
+      <section v-if="activeTab === 'find'" class="max-w-3xl mx-auto w-full px-4 pt-4">
 
         <!-- Sub-view toggle -->
         <div class="flex gap-2 mb-4">
@@ -757,9 +794,9 @@ export default defineComponent({
           </button>
         </div>
 
-        <!-- ── Search sub-view ── -->
+        <!-- Search sub-view -->
         <template v-if="findSubView === 'search'">
-          <div class="relative mb-4">
+          <div class="relative mb-4 md:hidden">
             <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
             <input v-model="globalQuery" type="text" placeholder="e.g. Paracetamol, Crocin, Antibiotic…"
               class="w-full pl-10 pr-10 py-3 border-2 border-gray-200 focus:border-green-500 rounded-xl text-sm outline-none bg-white shadow-sm" autocomplete="off" />
@@ -768,7 +805,7 @@ export default defineComponent({
           <div v-if="!globalQuery" class="text-center py-12 text-gray-400">
             <div class="text-5xl mb-3">💊</div>
             <p class="text-sm font-medium">Search across all nearby pharmacies</p>
-            <p class="text-xs mt-1 text-gray-300">Shows in-stock status — quantity not displayed</p>
+            <p class="text-xs mt-1 text-gray-300">Shows in-stock status — no quantities displayed</p>
           </div>
           <div v-else-if="globalResults.length === 0" class="text-center py-12 text-gray-400">
             <div class="text-4xl mb-3">🔎</div>
@@ -809,7 +846,7 @@ export default defineComponent({
           </div>
         </template>
 
-        <!-- ── Pharmacies sub-view ── -->
+        <!-- Pharmacies sub-view -->
         <template v-else>
           <template v-if="!selectedPharmacy">
             <p class="text-sm text-gray-500 mb-4">Tap a pharmacy to browse its full inventory.</p>
@@ -820,9 +857,7 @@ export default defineComponent({
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
                     <p class="font-bold text-gray-900">{{ ph.name }}</p>
-                    <span :class="['text-xs font-semibold px-2 py-0.5 rounded-full', ph.open ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600']">
-                      {{ ph.open ? 'Open' : 'Closed' }}
-                    </span>
+                    <span :class="['text-xs font-semibold px-2 py-0.5 rounded-full', ph.open ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600']">{{ ph.open ? 'Open' : 'Closed' }}</span>
                   </div>
                   <p class="text-xs text-gray-500 mt-0.5 truncate">{{ ph.address }}</p>
                   <div class="flex items-center gap-3 mt-1 text-xs text-gray-400 flex-wrap">
@@ -836,18 +871,14 @@ export default defineComponent({
             </div>
           </template>
           <template v-else>
-            <button @click="selectedPharmacy = null" class="flex items-center gap-1 text-green-700 text-sm font-medium mb-4 hover:text-green-800">
-              ← Back to pharmacies
-            </button>
+            <button @click="selectedPharmacy = null" class="flex items-center gap-1 text-green-700 text-sm font-medium mb-4 hover:text-green-800">← Back to pharmacies</button>
             <div class="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm mb-4">
               <div class="flex items-center gap-3">
                 <span class="text-3xl">🏪</span>
                 <div class="flex-1">
                   <div class="flex items-center gap-2 flex-wrap">
                     <h2 class="font-bold text-gray-900">{{ selectedPharmacy.name }}</h2>
-                    <span :class="['text-xs font-semibold px-2 py-0.5 rounded-full', selectedPharmacy.open ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600']">
-                      {{ selectedPharmacy.open ? 'Open Now' : 'Closed' }}
-                    </span>
+                    <span :class="['text-xs font-semibold px-2 py-0.5 rounded-full', selectedPharmacy.open ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600']">{{ selectedPharmacy.open ? 'Open Now' : 'Closed' }}</span>
                   </div>
                   <p class="text-xs text-gray-500 mt-0.5">{{ selectedPharmacy.address }}</p>
                   <p class="text-xs text-gray-400 mt-0.5">📞 {{ selectedPharmacy.phone }} · 🕐 {{ selectedPharmacy.hours }}</p>
@@ -885,7 +916,7 @@ export default defineComponent({
 
 
       <!-- ════ TAB: CART ════ -->
-      <section v-if="activeTab === 'cart'" class="max-w-lg mx-auto w-full px-4 pt-5">
+      <section v-if="activeTab === 'cart'" class="max-w-2xl mx-auto w-full px-4 pt-5">
         <div class="flex items-center justify-between mb-4">
           <h1 class="text-2xl font-bold text-gray-900">My Cart</h1>
           <span class="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full font-medium">{{ patientCarts.length }}/3 carts</span>
@@ -910,9 +941,7 @@ export default defineComponent({
                   <p class="text-xs text-gray-400">{{ cart.items.length }} item(s) · ₹{{ cartTotal(cart).toFixed(0) }} total</p>
                 </div>
               </div>
-              <button @click="deleteCart(cart.id)" class="text-red-400 hover:text-red-600 text-xs font-medium px-2 py-1 rounded hover:bg-red-50 transition">
-                Remove
-              </button>
+              <button @click="deleteCart(cart.id)" class="text-red-400 hover:text-red-600 text-xs font-medium px-2 py-1 rounded hover:bg-red-50 transition">Remove</button>
             </div>
             <div class="divide-y divide-gray-50">
               <div v-for="item in cart.items" :key="item.medId" class="flex items-center gap-3 px-4 py-3">
@@ -942,53 +971,115 @@ export default defineComponent({
               </button>
             </div>
           </div>
-          <p class="text-xs text-gray-400 text-center pb-2">
-            Show the QR code at the pharmacy counter for instant pickup. Up to 3 carts (one per pharmacy).
-          </p>
+          <p class="text-xs text-gray-400 text-center pb-2">Show QR at the pharmacy counter for instant pickup. Up to 3 carts (one per pharmacy).</p>
         </div>
       </section>
 
 
-      <!-- ════ TAB: ME ════ -->
+      <!-- ════ TAB: ME  (app-like "My Account" page) ════ -->
       <section v-if="activeTab === 'me'" class="max-w-lg mx-auto w-full px-4 pt-5">
 
-        <!-- Sub-navigation -->
-        <div class="flex overflow-x-auto gap-2 mb-4 pb-1 no-scrollbar">
-          <button v-for="sv in [{id:'profile',label:'👤 Profile'},{id:'orders',label:'📦 Orders'},{id:'chat',label:'🤖 PharmAI'},{id:'dosage',label:'💊 Dosage'}]"
-            :key="sv.id" @click="meSubView = sv.id"
-            :class="['shrink-0 px-4 py-1.5 rounded-full text-sm font-semibold border-2 transition', meSubView===sv.id ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 hover:border-green-300']">
-            {{ sv.label }}
+        <!-- Account header card -->
+        <div class="bg-gradient-to-br from-green-600 to-emerald-700 rounded-2xl p-5 mb-4 text-white">
+          <div class="flex items-center gap-4">
+            <div class="w-16 h-16 rounded-full bg-white/20 text-white text-2xl font-extrabold flex items-center justify-center shrink-0 border-2 border-white/30">
+              {{ getInitials(patientUser.name) }}
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="font-extrabold text-lg leading-tight truncate">{{ patientUser.name }}</p>
+              <p class="text-sm text-white/80 mt-0.5">{{ patientUser.phone }}</p>
+              <span :class="['inline-block text-xs font-bold px-2 py-0.5 rounded-full mt-1.5', patientUser.phoneVerified ? 'bg-white/20 text-white' : 'bg-amber-300/80 text-amber-900']">
+                {{ patientUser.phoneVerified ? '✓ Phone Verified' : '⚠ Phone Not Verified' }}
+              </span>
+            </div>
+          </div>
+          <!-- Verify nudge inside header -->
+          <button v-if="!patientUser.phoneVerified" @click="startVerify()"
+            class="mt-3 w-full bg-white/15 hover:bg-white/25 text-white text-sm font-semibold py-2 rounded-xl transition border border-white/20">
+            📱 Tap to Verify Mobile Number
           </button>
         </div>
 
-        <!-- Profile -->
-        <div v-if="meSubView === 'profile'">
-          <div class="bg-white border border-gray-200 rounded-2xl shadow-sm p-5 mb-4">
-            <div class="flex items-center gap-4 mb-5">
-              <div class="w-14 h-14 rounded-full bg-green-600 text-white text-xl font-extrabold flex items-center justify-center shrink-0">
-                {{ getInitials(patientUser.name) }}
-              </div>
-              <div>
-                <p class="font-bold text-gray-900 text-lg">{{ patientUser.name }}</p>
-                <p class="text-sm text-gray-500 mt-0.5">{{ patientUser.phone }}</p>
-                <span :class="['inline-block text-xs font-bold px-2 py-0.5 rounded-full mt-1', patientUser.phoneVerified ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700']">
-                  {{ patientUser.phoneVerified ? '✓ Phone Verified' : '⚠ Phone Not Verified' }}
-                </span>
-              </div>
+        <!-- Account list -->
+        <div v-if="meSubView === 'list'" class="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden mb-4">
+
+          <!-- My Orders row -->
+          <button @click="meSubView = 'orders'"
+            class="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-gray-50 transition border-b border-gray-100">
+            <div class="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center text-lg shrink-0">📦</div>
+            <div class="flex-1 text-left">
+              <p class="text-sm font-semibold text-gray-900">My Orders</p>
+              <p class="text-xs text-gray-400">{{ patientOrders.length }} order(s)</p>
             </div>
-            <button v-if="!patientUser.phoneVerified" @click="startVerify()"
-              class="w-full mb-3 bg-amber-50 border border-amber-300 text-amber-800 text-sm font-semibold py-2.5 rounded-xl hover:bg-amber-100 transition">
-              📱 Verify Mobile Number
-            </button>
-            <button @click="logoutPatient()"
-              class="w-full border-2 border-red-200 text-red-600 text-sm font-semibold py-2.5 rounded-xl hover:bg-red-50 transition">
-              Logout
-            </button>
-          </div>
+            <span class="text-gray-400 text-lg">›</span>
+          </button>
+
+          <!-- My Prescriptions row -->
+          <button @click="showScanner = true"
+            class="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-gray-50 transition border-b border-gray-100">
+            <div class="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center text-lg shrink-0">📷</div>
+            <div class="flex-1 text-left">
+              <p class="text-sm font-semibold text-gray-900">My Prescriptions</p>
+              <p class="text-xs text-gray-400">Scan or upload a prescription</p>
+            </div>
+            <span class="text-gray-400 text-lg">›</span>
+          </button>
+
+          <!-- My Dosage Slips row -->
+          <button @click="meSubView = 'dosage'"
+            class="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-gray-50 transition border-b border-gray-100">
+            <div class="w-9 h-9 rounded-xl bg-purple-50 flex items-center justify-center text-lg shrink-0">💊</div>
+            <div class="flex-1 text-left">
+              <p class="text-sm font-semibold text-gray-900">My Dosage Slips</p>
+              <p class="text-xs text-gray-400">{{ dosageSlips.length }} slip(s)</p>
+            </div>
+            <span class="text-gray-400 text-lg">›</span>
+          </button>
+
+          <!-- PharmAI Chatbot row -->
+          <button @click="showChat = true"
+            class="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-gray-50 transition border-b border-gray-100">
+            <div class="w-9 h-9 rounded-xl bg-teal-50 flex items-center justify-center text-lg shrink-0">🤖</div>
+            <div class="flex-1 text-left">
+              <p class="text-sm font-semibold text-gray-900">PharmAI Assistant</p>
+              <p class="text-xs text-gray-400">Ask about medicines, dosage, side effects</p>
+            </div>
+            <span class="text-gray-400 text-lg">›</span>
+          </button>
+
+          <!-- Cart row -->
+          <button @click="activeTab = 'cart'"
+            class="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-gray-50 transition border-b border-gray-100">
+            <div class="w-9 h-9 rounded-xl bg-orange-50 flex items-center justify-center text-lg shrink-0">🛒</div>
+            <div class="flex-1 text-left">
+              <p class="text-sm font-semibold text-gray-900">My Cart</p>
+              <p class="text-xs text-gray-400">{{ patientCarts.length }} active cart(s) · {{ cartItemCount }} item(s)</p>
+            </div>
+            <span class="text-gray-400 text-lg">›</span>
+          </button>
+
+          <!-- Find Medicines row -->
+          <button @click="activeTab = 'find'"
+            class="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-gray-50 transition">
+            <div class="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center text-lg shrink-0">🔍</div>
+            <div class="flex-1 text-left">
+              <p class="text-sm font-semibold text-gray-900">Find Medicines</p>
+              <p class="text-xs text-gray-400">Search across nearby pharmacies</p>
+            </div>
+            <span class="text-gray-400 text-lg">›</span>
+          </button>
         </div>
 
-        <!-- Orders -->
+        <!-- Logout button -->
+        <button v-if="meSubView === 'list'" @click="logoutPatient()"
+          class="w-full border-2 border-red-200 text-red-600 text-sm font-semibold py-3 rounded-2xl hover:bg-red-50 transition flex items-center justify-center gap-2 mb-6">
+          <span>🚪</span> Logout
+        </button>
+
+        <!-- ── Orders sub-view ── -->
         <div v-if="meSubView === 'orders'">
+          <button @click="meSubView = 'list'" class="flex items-center gap-1 text-green-700 text-sm font-medium mb-4 hover:text-green-800">← Back</button>
+          <h2 class="text-lg font-bold text-gray-900 mb-3">My Orders</h2>
           <div v-if="patientOrders.length === 0" class="text-center py-14 text-gray-400">
             <div class="text-5xl mb-3">📦</div>
             <p class="text-sm font-medium">No orders yet</p>
@@ -1008,79 +1099,45 @@ export default defineComponent({
                   <span :class="['text-xs font-bold px-2 py-0.5 rounded-full', order.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700']">
                     {{ order.status === 'pending' ? '⏳ Pending' : '✓ Fulfilled' }}
                   </span>
-                  <button @click="openOrderQR(order)"
-                    class="mt-2 block text-xs text-green-700 font-semibold underline hover:text-green-800 ml-auto">
-                    View QR →
-                  </button>
+                  <button @click="openOrderQR(order)" class="mt-2 block text-xs text-green-700 font-semibold underline hover:text-green-800 ml-auto">View QR →</button>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- AI Chatbot -->
-        <div v-if="meSubView === 'chat'">
-          <div class="bg-green-50 border border-green-100 rounded-2xl p-3 mb-3 flex items-center gap-2">
-            <span class="text-2xl">🤖</span>
-            <div>
-              <p class="text-sm font-bold text-green-800">PharmAI – Medicine Assistant</p>
-              <p class="text-xs text-green-600">Ask about medicines, dosages, side effects, or how to order.</p>
-            </div>
-          </div>
-          <div class="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden" style="height: 380px; display: flex; flex-direction: column;">
-            <div class="flex-1 overflow-y-auto p-3 space-y-3">
-              <div v-for="msg in chatMessages" :key="msg.id" :class="['flex', msg.from === 'user' ? 'justify-end' : 'justify-start gap-2']">
-                <div v-if="msg.from === 'bot'" class="w-7 h-7 rounded-full bg-green-100 text-green-700 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">🤖</div>
-                <div :class="['max-w-[80%] px-3 py-2 rounded-2xl text-sm whitespace-pre-line', msg.from === 'user' ? 'bg-green-600 text-white rounded-br-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm']">
-                  {{ msg.text }}
+        <!-- ── Dosage Slips sub-view ── -->
+        <div v-if="meSubView === 'dosage'">
+          <button @click="meSubView = 'list'" class="flex items-center gap-1 text-green-700 text-sm font-medium mb-4 hover:text-green-800">← Back</button>
+          <h2 class="text-lg font-bold text-gray-900 mb-3">My Dosage Slips</h2>
+          <div class="space-y-4">
+            <div v-for="slip in dosageSlips" :key="slip.id"
+              class="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+              <div class="bg-green-600 text-white px-4 py-3 flex items-center justify-between">
+                <div>
+                  <p class="font-bold">{{ slip.medicine }}</p>
+                  <p class="text-xs opacity-80">By {{ slip.prescribedBy }} · {{ slip.date }}</p>
                 </div>
+                <span class="text-3xl">💊</span>
               </div>
-              <div v-if="chatTyping" class="flex justify-start gap-2">
-                <div class="w-7 h-7 rounded-full bg-green-100 text-xs flex items-center justify-center shrink-0">🤖</div>
-                <div class="bg-gray-100 px-3 py-2.5 rounded-2xl rounded-bl-sm">
-                  <div class="dot-pulse text-green-600"><span></span><span></span><span></span></div>
-                </div>
+              <div class="px-4 py-4 grid grid-cols-2 gap-3 text-sm">
+                <div><p class="text-xs text-gray-400 font-medium uppercase">Dosage</p><p class="text-gray-800 font-semibold mt-0.5">{{ slip.dosage }}</p></div>
+                <div><p class="text-xs text-gray-400 font-medium uppercase">Frequency</p><p class="text-gray-800 font-semibold mt-0.5">{{ slip.frequency }}</p></div>
+                <div><p class="text-xs text-gray-400 font-medium uppercase">Timing</p><p class="text-gray-800 font-semibold mt-0.5">{{ slip.timing }}</p></div>
+                <div><p class="text-xs text-gray-400 font-medium uppercase">Duration</p><p class="text-gray-800 font-semibold mt-0.5">{{ slip.duration }}</p></div>
               </div>
-            </div>
-            <div class="border-t border-gray-100 p-3 flex gap-2 shrink-0">
-              <input v-model="chatInput" type="text" placeholder="Ask about a medicine…" @keyup.enter="sendChat"
-                class="flex-1 border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" />
-              <button @click="sendChat" :disabled="!chatInput.trim()"
-                class="bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white font-bold px-4 rounded-xl text-sm transition">
-                →
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Dosage slips -->
-        <div v-if="meSubView === 'dosage'" class="space-y-4">
-          <div v-for="slip in dosageSlips" :key="slip.id"
-            class="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-            <div class="bg-green-600 text-white px-4 py-3 flex items-center justify-between">
-              <div>
-                <p class="font-bold">{{ slip.medicine }}</p>
-                <p class="text-xs opacity-80">By {{ slip.prescribedBy }} · {{ slip.date }}</p>
+              <div class="bg-amber-50 border-t border-amber-200 px-4 py-3 flex gap-2">
+                <span class="text-amber-500 text-lg shrink-0">⚠️</span>
+                <p class="text-xs text-amber-800">{{ slip.warnings }}</p>
               </div>
-              <span class="text-3xl">💊</span>
-            </div>
-            <div class="px-4 py-4 grid grid-cols-2 gap-3 text-sm">
-              <div><p class="text-xs text-gray-400 font-medium uppercase">Dosage</p><p class="text-gray-800 font-semibold mt-0.5">{{ slip.dosage }}</p></div>
-              <div><p class="text-xs text-gray-400 font-medium uppercase">Frequency</p><p class="text-gray-800 font-semibold mt-0.5">{{ slip.frequency }}</p></div>
-              <div><p class="text-xs text-gray-400 font-medium uppercase">Timing</p><p class="text-gray-800 font-semibold mt-0.5">{{ slip.timing }}</p></div>
-              <div><p class="text-xs text-gray-400 font-medium uppercase">Duration</p><p class="text-gray-800 font-semibold mt-0.5">{{ slip.duration }}</p></div>
-            </div>
-            <div class="bg-amber-50 border-t border-amber-200 px-4 py-3 flex gap-2">
-              <span class="text-amber-500 text-lg shrink-0">⚠️</span>
-              <p class="text-xs text-amber-800">{{ slip.warnings }}</p>
             </div>
           </div>
         </div>
       </section>
 
 
-      <!-- ════ STICKY BOTTOM NAVIGATION ════ -->
-      <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 no-print">
+      <!-- ════ MOBILE BOTTOM NAVIGATION (hidden on desktop) ════ -->
+      <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 no-print">
         <div class="grid grid-cols-5">
           <button v-for="tab in tabs" :key="tab.id" @click="handleTabClick(tab.id)"
             :class="['relative flex flex-col items-center py-2 gap-0.5 focus:outline-none transition', activeTab === tab.id && tab.id !== 'scanner' ? 'bottom-nav-active' : 'text-gray-500 hover:text-green-600']">
@@ -1093,6 +1150,18 @@ export default defineComponent({
           </button>
         </div>
       </nav>
+
+      <!-- ════ FLOATING PHARMAI BUTTON (always visible when logged in) ════ -->
+      <button
+        v-if="patientUser"
+        @click="showChat = !showChat"
+        :class="['fixed z-40 flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold shadow-xl transition-all',
+                 showChat ? 'bottom-20 md:bottom-[520px] right-4 rounded-full w-12 h-12 justify-center text-xl' : 'bottom-20 md:bottom-4 right-4 rounded-full px-4 py-2.5 text-sm']"
+        :title="showChat ? 'Close PharmAI' : 'Open PharmAI Chatbot'"
+      >
+        <span :class="showChat ? 'text-xl' : ''">🤖</span>
+        <span v-if="!showChat" class="hidden sm:inline">PharmAI</span>
+      </button>
 
       <!-- Scanner modal -->
       <ScannerModal v-model:show="showScanner" title="Scan Your Prescription" mode="patient" />

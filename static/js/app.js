@@ -9,7 +9,7 @@
  *   • Auth state is held in localStorage under 'op_auth' (no passwords stored there).
  */
 
-import { createApp, ref, provide, computed } from 'vue';
+import { createApp, ref, reactive, provide, onMounted, onUnmounted } from 'vue';
 
 // ── Page-level view imports ──────────────────────────────────────────────────
 import AdminDashboard from './views/AdminDashboard.js';
@@ -243,53 +243,59 @@ const App = {
     /** The currently active portal view name. */
     const currentView = ref('PatientHome');
 
-    /** The currently authenticated user (null = guest / patient browsing). */
+    /** The currently authenticated staff user (null = guest / patient browsing). */
     const currentUser = ref(getAuth());
 
-    /**
-     * When a guest tries to open a protected portal, we remember where they
-     * wanted to go so we can redirect after a successful login.
-     */
+    /** When a guest tries to open a protected portal, remember target for post-login redirect. */
     const pendingView = ref(null);
 
-    /** Nav tabs shown across all portals. */
-    const views = [
-      { id: 'PatientHome',    label: 'Patient', protected: false },
-      { id: 'StaffPos',       label: 'Staff',   protected: true  },
-      { id: 'AdminDashboard', label: 'Admin',   protected: true  },
-    ];
+    /**
+     * Shared bridge object for the patient portal.
+     * Provided to all descendants (PatientHome + Navbar) so they share reactive
+     * state without prop-drilling.
+     *
+     *   user        – currently logged-in patient (null = guest)
+     *   cartCount   – total item count across all active carts
+     *   city        – selected city for pharmacy geo-filter
+     *   activeTab   – active page in PatientHome ('home'|'find'|'cart'|'me')
+     *   showScanner – flag to open the ScannerModal from Navbar scan button
+     *   searchQuery – text typed in the desktop navbar search bar
+     */
+    const patientBridge = reactive({
+      user:        getPatientAuth(),
+      cartCount:   0,
+      city:        localStorage.getItem('op_city') || 'Kolkata',
+      activeTab:   'home',
+      showScanner: false,
+      searchQuery: '',
+    });
 
     /**
      * Route to a portal view with auth guard.
-     * • PatientHome is always accessible.
-     * • StaffPos / AdminDashboard require a valid session.
-     * • AdminDashboard is further restricted to the 'admin' role.
+     * PatientHome is always accessible; StaffPos/AdminDashboard require auth.
      */
     const switchView = (id) => {
-      const viewDef = views.find((v) => v.id === id);
-      if (viewDef && viewDef.protected && !currentUser.value) {
+      if (id === 'PatientHome') {
+        currentView.value = 'PatientHome';
+        window.location.hash = '';
+        return;
+      }
+      const protected_ = { StaffPos: true, AdminDashboard: true };
+      if (protected_[id] && !currentUser.value) {
         pendingView.value = id;
         currentView.value = 'LoginPage';
         return;
       }
-      if (id === 'AdminDashboard' && currentUser.value && currentUser.value.role !== 'admin') {
-        // Non-admin staff should not reach the admin panel
-        return;
-      }
+      if (id === 'AdminDashboard' && currentUser.value && currentUser.value.role !== 'admin') return;
       currentView.value = id;
     };
 
-    /**
-     * Called by LoginPage after credentials are validated.
-     * Stores the safe (password-free) user object and navigates to the
-     * intended portal (or the role's default portal if no pending view).
-     */
+    /** Called by LoginPage after credentials are validated. */
     const handleLogin = (user) => {
       saveAuth(user);
       currentUser.value = { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar };
       const target = pendingView.value || (user.role === 'admin' ? 'AdminDashboard' : 'StaffPos');
       pendingView.value = null;
-      // Call switchView so role-checks and guard logic are always applied consistently
       switchView(target);
     };
 
@@ -298,30 +304,41 @@ const App = {
       clearAuth();
       currentUser.value = null;
       currentView.value = 'PatientHome';
+      window.location.hash = '';
     };
 
-    // ── Provide shared state & actions to all descendants ────────────────
-    provide('currentView',  currentView);
-    provide('currentUser',  currentUser);
-    provide('switchView',   switchView);
-    provide('handleLogin',  handleLogin);
-    provide('handleLogout', handleLogout);
+    // ── Hash-based URL routing ─────────────────────────────────────────
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+      if (hash === 'staff')      switchView('StaffPos');
+      else if (hash === 'admin') switchView('AdminDashboard');
+      else if (!hash)            currentView.value = 'PatientHome';
+    };
+    onMounted(() => {
+      handleHashChange();
+      window.addEventListener('hashchange', handleHashChange);
+    });
+    onUnmounted(() => window.removeEventListener('hashchange', handleHashChange));
 
-    return { currentView, currentUser, views, switchView, handleLogout };
+    // ── Provide shared state & actions to all descendants ──────────────
+    provide('currentView',   currentView);
+    provide('currentUser',   currentUser);
+    provide('switchView',    switchView);
+    provide('handleLogin',   handleLogin);
+    provide('handleLogout',  handleLogout);
+    provide('patientBridge', patientBridge);
+
+    return { currentView, currentUser, switchView, handleLogout, patientBridge };
   },
 
   template: `
     <div class="min-h-screen flex flex-col">
-      <!-- Top navigation bar – shared across all portals -->
       <Navbar
-        :views="views"
-        :current="currentView"
-        :user="currentUser"
-        @switch="switchView"
-        @logout="handleLogout"
+        :current-view="currentView"
+        :staff-user="currentUser"
+        :patient-bridge="patientBridge"
+        @staff-logout="handleLogout"
       />
-
-      <!-- Dynamic portal rendering -->
       <main class="flex-1">
         <Transition name="fade" mode="out-in">
           <component :is="currentView" :key="currentView" />
