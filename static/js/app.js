@@ -70,12 +70,17 @@ const DEFAULT_PHARMACY_INVENTORIES = {
  * Passwords are only used for the simulated login; they are NEVER stored in op_auth.
  * Roles: 'admin' (owner), 'cashier' (billing), 'pharmacist' (dispensing).
  */
+/**
+ * Staff accounts for Saha Pharmacy.
+ * Role 'admin' → AdminDashboard; role 'staff' → StaffPos (POS).
+ * All non-admin staff have identical POS access (no cashier/pharmacist split).
+ */
 const DEFAULT_STAFF = [
-  { id: 1, name: 'Suresh Saha',   email: 'admin@saha.com',  password: 'admin123', role: 'admin',       phone: '+91-98765-00001', joinDate: '2022-06-01', active: true,  avatar: 'SS' },
-  { id: 2, name: 'Raj Kumar',     email: 'raj@saha.com',    password: 'pass123',  role: 'cashier',     phone: '+91-98765-00002', joinDate: '2023-03-15', active: true,  avatar: 'RK' },
-  { id: 3, name: 'Priya Singh',   email: 'priya@saha.com',  password: 'pass123',  role: 'cashier',     phone: '+91-98765-00003', joinDate: '2023-08-20', active: true,  avatar: 'PS' },
-  { id: 4, name: 'Dr. Amit Dev',  email: 'amit@saha.com',   password: 'pass123',  role: 'pharmacist',  phone: '+91-98765-00004', joinDate: '2023-01-10', active: false, avatar: 'AD' },
-  { id: 5, name: 'Meena Rao',     email: 'meena@saha.com',  password: 'pass123',  role: 'cashier',     phone: '+91-98765-00005', joinDate: '2024-01-05', active: true,  avatar: 'MR' },
+  { id: 1, name: 'Suresh Saha',  email: 'admin@saha.com',  password: 'admin123', role: 'admin', phone: '+91-98765-00001', joinDate: '2022-06-01', active: true,  avatar: 'SS' },
+  { id: 2, name: 'Raj Kumar',    email: 'raj@saha.com',    password: 'pass123',  role: 'staff', phone: '+91-98765-00002', joinDate: '2023-03-15', active: true,  avatar: 'RK' },
+  { id: 3, name: 'Priya Singh',  email: 'priya@saha.com',  password: 'pass123',  role: 'staff', phone: '+91-98765-00003', joinDate: '2023-08-20', active: true,  avatar: 'PS' },
+  { id: 4, name: 'Dr. Amit Dev', email: 'amit@saha.com',   password: 'pass123',  role: 'staff', phone: '+91-98765-00004', joinDate: '2023-01-10', active: false, avatar: 'AD' },
+  { id: 5, name: 'Meena Rao',    email: 'meena@saha.com',  password: 'pass123',  role: 'staff', phone: '+91-98765-00005', joinDate: '2024-01-05', active: true,  avatar: 'MR' },
 ];
 
 /**
@@ -146,6 +151,14 @@ const generateSlots = () => {
   return slots;
 };
 
+/** Default doctors for the master database. */
+const DEFAULT_DOCTORS = [
+  { id: 1, name: 'Dr. R. Mehta',      specialty: 'General Physician',  phone: '+91-99001-11111', clinic: 'Mehta Clinic, Park Street', active: true },
+  { id: 2, name: 'Dr. A. Sen',        specialty: 'Diabetologist',      phone: '+91-99001-22222', clinic: 'Sen Diabetes Centre, Salt Lake', active: true },
+  { id: 3, name: 'Dr. P. Chatterjee', specialty: 'Cardiologist',       phone: '+91-99001-33333', clinic: 'Heart Care Hospital, Ballygunge', active: true },
+  { id: 4, name: 'Dr. S. Roy',        specialty: 'Pulmonologist',      phone: '+91-99001-44444', clinic: 'Breath Easy Clinic, New Town', active: true },
+];
+
 // ── Seed localStorage on first visit ────────────────────────────────────────
 const seedLocalStorage = () => {
   if (!localStorage.getItem('op_inventory')) {
@@ -177,6 +190,12 @@ const seedLocalStorage = () => {
   }
   if (!localStorage.getItem('op_orders')) {
     localStorage.setItem('op_orders',      JSON.stringify([]));
+  }
+  if (!localStorage.getItem('op_doctors')) {
+    localStorage.setItem('op_doctors',     JSON.stringify(DEFAULT_DOCTORS));
+  }
+  if (!localStorage.getItem('op_medicine_requests')) {
+    localStorage.setItem('op_medicine_requests', JSON.stringify([]));
   }
 };
 
@@ -237,7 +256,7 @@ export const clearAuth = () => localStorage.removeItem('op_auth');
  * can use the same colour scheme without duplication.
  */
 export const roleBadgeClass = (role) => {
-  const map = { admin: 'bg-purple-100 text-purple-700', cashier: 'bg-blue-100 text-blue-700', pharmacist: 'bg-teal-100 text-teal-700' };
+  const map = { admin: 'bg-purple-100 text-purple-700', staff: 'bg-green-100 text-green-700' };
   return map[role] || 'bg-gray-100 text-gray-700';
 };
 
@@ -355,6 +374,83 @@ const App = {
           <component :is="currentView" :key="currentView" />
         </Transition>
       </main>
+
+      <!-- ═══════════════════════════════════════════════════
+           SITE FOOTER
+           ═══════════════════════════════════════════════════ -->
+      <footer class="bg-gray-900 text-gray-300 mt-auto no-print">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 py-10">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-8">
+
+            <!-- Brand column -->
+            <div>
+              <div class="flex items-center gap-2 mb-3">
+                <span class="text-2xl">💊</span>
+                <span class="font-extrabold text-white text-lg">OnePharma</span>
+              </div>
+              <p class="text-xs text-gray-400 leading-relaxed">
+                Bridging patients, pharmacies, and healthcare providers on a single intelligent platform.
+                Phase 1 working prototype.
+              </p>
+              <p class="text-xs text-gray-500 mt-3">© 2026 OnePharma. All rights reserved.</p>
+            </div>
+
+            <!-- For Patients column -->
+            <div>
+              <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">For Patients</h3>
+              <ul class="space-y-2 text-sm">
+                <li>
+                  <button @click="patientBridge.activeTab = 'home'; currentView = 'PatientHome'"
+                    class="hover:text-white transition">🏠 Patient Home</button>
+                </li>
+                <li>
+                  <button @click="patientBridge.activeTab = 'find'; currentView = 'PatientHome'"
+                    class="hover:text-white transition">🔍 Find Medicines</button>
+                </li>
+                <li>
+                  <button @click="patientBridge.showScanner = true; currentView = 'PatientHome'"
+                    class="hover:text-white transition">📷 Scan Prescription</button>
+                </li>
+              </ul>
+            </div>
+
+            <!-- For Professionals column -->
+            <div>
+              <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">For Professionals</h3>
+              <ul class="space-y-2 text-sm">
+                <li>
+                  <a href="#staff" class="hover:text-white transition flex items-center gap-2">
+                    <span class="bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">Staff</span>
+                    Pharmacy Staff Login
+                  </a>
+                </li>
+                <li>
+                  <a href="#admin" class="hover:text-white transition flex items-center gap-2">
+                    <span class="bg-purple-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">Admin</span>
+                    Admin / Owner Dashboard
+                  </a>
+                </li>
+                <li class="text-xs text-gray-500 pt-1">
+                  Navigate to <code class="bg-gray-800 px-1.5 py-0.5 rounded">#staff</code> or
+                  <code class="bg-gray-800 px-1.5 py-0.5 rounded">#admin</code> in the URL
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- Bottom bar -->
+          <div class="border-t border-gray-800 mt-8 pt-5 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p class="text-xs text-gray-500">Phase 1 Prototype · No real data is stored · localStorage only</p>
+            <div class="flex items-center gap-4 text-xs text-gray-500">
+              <span>Vue 3</span>
+              <span>·</span>
+              <span>Tailwind CSS</span>
+              <span>·</span>
+              <span>100% Serverless</span>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   `,
 };

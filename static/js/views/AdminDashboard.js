@@ -11,7 +11,7 @@
  */
 import { defineComponent, ref, computed, onMounted, watch, nextTick, reactive } from 'vue';
 import StockAlertCard from '../components/StockAlertCard.js';
-import { getInventory, getSalesData, getStaff, saveStaff, roleBadgeClass } from '../app.js';
+import { getInventory, getSalesData, getStaff, saveStaff, roleBadgeClass, getPharmacies, getMedicineRequests, saveMedicineRequests, getDoctors, saveDoctors } from '../app.js';
 
 export default defineComponent({
   name: 'AdminDashboard',
@@ -36,11 +36,14 @@ export default defineComponent({
 
     // ── Navigation items ───────────────────────────────────────────────────
     const navItems = [
-      { id: 'analytics', icon: '📊', label: 'Analytics'  },
-      { id: 'alerts',    icon: '🔔', label: 'Alerts'     },
-      { id: 'inventory', icon: '📦', label: 'Inventory'  },
-      { id: 'supplier',  icon: '📋', label: 'Supplier'   },
-      { id: 'staff',     icon: '👥', label: 'Staff'      },
+      { id: 'analytics',    icon: '📊', label: 'Analytics'    },
+      { id: 'alerts',       icon: '🔔', label: 'Alerts'       },
+      { id: 'inventory',    icon: '📦', label: 'Inventory'    },
+      { id: 'supplier',     icon: '📋', label: 'Supplier'     },
+      { id: 'staff',        icon: '👥', label: 'Staff'        },
+      { id: 'pharmacies',   icon: '🏪', label: 'Pharmacies'   },
+      { id: 'doctors',      icon: '🩺', label: 'Doctors'      },
+      { id: 'med_requests', icon: '🆕', label: 'Med Requests' },
     ];
 
     // ── Staff Management state ─────────────────────────────────────────────
@@ -52,7 +55,7 @@ export default defineComponent({
     const blankForm = () => ({ name: '', email: '', password: '', role: 'cashier', phone: '', active: true });
     const staffForm = reactive(blankForm());
 
-    const ROLES = ['admin', 'cashier', 'pharmacist'];
+    const ROLES = ['admin', 'staff'];  // All non-admin staff have unified POS access
 
     // Delegate to the shared utility exported from app.js
     const roleBadge = roleBadgeClass;
@@ -213,6 +216,77 @@ export default defineComponent({
     const totalAlerts  = computed(() => lowStockAlerts.value.length + expiryAlerts.value.length);
     const totalItems   = computed(() => inventory.value.length);
 
+
+    // ── Pharmacies management ──────────────────────────────────────────────────
+    const pharmacyList   = ref(getPharmacies());
+    const showAddPharmacy = ref(false);
+    const editingPharmacy = ref(null);
+    const confirmRemovePharmacyId = ref(null);
+    const blankPharmacy = () => ({ name: '', address: '', phone: '', hours: '', rating: 4.0, open: true, distance: '' });
+    const pharmacyForm = reactive(blankPharmacy());
+
+    const openAddPharmacy = () => { Object.assign(pharmacyForm, blankPharmacy()); editingPharmacy.value = null; showAddPharmacy.value = true; };
+    const openEditPharmacy = (ph) => { Object.assign(pharmacyForm, { ...ph }); editingPharmacy.value = ph.id; showAddPharmacy.value = true; };
+    const savePharmacyEntry = () => {
+      if (!pharmacyForm.name.trim()) return;
+      const ls = JSON.parse(localStorage.getItem('op_pharmacies') || '[]');
+      if (editingPharmacy.value === null) {
+        const newId = Math.max(0, ...ls.map(p => p.id)) + 1;
+        ls.push({ ...pharmacyForm, id: newId, totalRatings: 0 });
+      } else {
+        const idx = ls.findIndex(p => p.id === editingPharmacy.value);
+        if (idx !== -1) Object.assign(ls[idx], pharmacyForm);
+      }
+      localStorage.setItem('op_pharmacies', JSON.stringify(ls));
+      pharmacyList.value = ls;
+      showAddPharmacy.value = false;
+    };
+    const removePharmacy = (id) => { confirmRemovePharmacyId.value = id; };
+    const confirmRemovePharmacy = () => {
+      const ls = JSON.parse(localStorage.getItem('op_pharmacies') || '[]').filter(p => p.id !== confirmRemovePharmacyId.value);
+      localStorage.setItem('op_pharmacies', JSON.stringify(ls));
+      pharmacyList.value = ls; confirmRemovePharmacyId.value = null;
+    };
+
+    // ── Doctors management ─────────────────────────────────────────────────────
+    const doctorList   = ref(getDoctors());
+    const showAddDoctor = ref(false);
+    const editingDoctor = ref(null);
+    const confirmRemoveDoctorId = ref(null);
+    const blankDoctor = () => ({ name: '', specialty: '', phone: '', clinic: '', active: true });
+    const doctorForm = reactive(blankDoctor());
+
+    const openAddDoctor = () => { Object.assign(doctorForm, blankDoctor()); editingDoctor.value = null; showAddDoctor.value = true; };
+    const openEditDoctor = (doc) => { Object.assign(doctorForm, { ...doc }); editingDoctor.value = doc.id; showAddDoctor.value = true; };
+    const saveDoctorEntry = () => {
+      if (!doctorForm.name.trim()) return;
+      const list = getDoctors();
+      if (editingDoctor.value === null) {
+        list.push({ ...doctorForm, id: Date.now() });
+      } else {
+        const idx = list.findIndex(d => d.id === editingDoctor.value);
+        if (idx !== -1) Object.assign(list[idx], doctorForm);
+      }
+      saveDoctors(list); doctorList.value = list; showAddDoctor.value = false;
+    };
+    const removeDoctor = (id) => { confirmRemoveDoctorId.value = id; };
+    const confirmRemoveDoctor = () => {
+      const list = getDoctors().filter(d => d.id !== confirmRemoveDoctorId.value);
+      saveDoctors(list); doctorList.value = list; confirmRemoveDoctorId.value = null;
+    };
+
+    // ── Medicine Requests management ───────────────────────────────────────────
+    const medRequests = ref(getMedicineRequests());
+    const approveRequest = (req) => {
+      const list = getMedicineRequests().map(r => r.id === req.id ? { ...r, status: 'approved' } : r);
+      saveMedicineRequests(list); medRequests.value = list;
+    };
+    const rejectRequest = (req) => {
+      const list = getMedicineRequests().map(r => r.id === req.id ? { ...r, status: 'rejected' } : r);
+      saveMedicineRequests(list); medRequests.value = list;
+    };
+    const pendingRequests = computed(() => medRequests.value.filter(r => r.status === 'pending').length);
+
     return {
       activePanel, navItems,
       inventory, salesData,
@@ -223,6 +297,16 @@ export default defineComponent({
       staffList, showAddStaff, staffForm, editingStaff, ROLES,
       roleBadge, openAddForm, openEditForm, saveStaffMember, toggleActive, removeMember,
       confirmRemoveId, confirmRemove,
+      // Pharmacies
+      pharmacyList, showAddPharmacy, editingPharmacy, pharmacyForm,
+      confirmRemovePharmacyId,
+      openAddPharmacy, openEditPharmacy, savePharmacyEntry, removePharmacy, confirmRemovePharmacy,
+      // Doctors
+      doctorList, showAddDoctor, editingDoctor, doctorForm,
+      confirmRemoveDoctorId,
+      openAddDoctor, openEditDoctor, saveDoctorEntry, removeDoctor, confirmRemoveDoctor,
+      // Medicine requests
+      medRequests, pendingRequests, approveRequest, rejectRequest,
     };
   },
 
@@ -758,6 +842,270 @@ export default defineComponent({
               </div>
             </div>
           </Transition>
+        </section>
+
+
+        <!-- ────────────────────────────────────────────────
+             PANEL 6: PHARMACIES MANAGEMENT
+             ──────────────────────────────────────────────── -->
+        <section v-if="activePanel === 'pharmacies'">
+          <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
+            <h1 class="text-2xl font-bold text-gray-900">🏪 Pharmacy Management</h1>
+            <button @click="openAddPharmacy"
+              class="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2.5 rounded-xl text-sm transition">
+              + Add Pharmacy
+            </button>
+          </div>
+
+          <!-- Pharmacy grid -->
+          <div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-5">
+            <div v-for="ph in pharmacyList" :key="ph.id"
+              class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 flex flex-col gap-2">
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span class="text-2xl">🏪</span>
+                  <div>
+                    <p class="font-bold text-gray-900 text-sm">{{ ph.name }}</p>
+                    <span :class="['text-xs font-semibold px-2 py-0.5 rounded-full', ph.open ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600']">
+                      {{ ph.open ? 'Open' : 'Closed' }}
+                    </span>
+                  </div>
+                </div>
+                <div class="flex gap-1 shrink-0">
+                  <button @click="openEditPharmacy(ph)" class="text-xs text-blue-600 hover:text-blue-800 font-medium px-2 py-1 rounded hover:bg-blue-50">Edit</button>
+                  <button @click="removePharmacy(ph.id)" class="text-xs text-red-500 hover:text-red-700 font-medium px-2 py-1 rounded hover:bg-red-50">Remove</button>
+                </div>
+              </div>
+              <p class="text-xs text-gray-500 leading-snug">{{ ph.address }}</p>
+              <div class="flex items-center gap-3 text-xs text-gray-400 flex-wrap">
+                <span>📞 {{ ph.phone }}</span>
+                <span>🕐 {{ ph.hours }}</span>
+                <span class="text-amber-500">★ {{ ph.rating }}</span>
+                <span v-if="ph.distance">📍 {{ ph.distance }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Add/Edit Pharmacy Modal -->
+          <Transition name="fade">
+            <div v-if="showAddPharmacy" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" @click.self="showAddPharmacy=false">
+              <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+                <h2 class="text-lg font-bold text-gray-900 mb-4">{{ editingPharmacy === null ? 'Add Pharmacy' : 'Edit Pharmacy' }}</h2>
+                <div class="space-y-3">
+                  <label class="block"><span class="text-xs font-medium text-gray-600">Name *</span>
+                    <input v-model="pharmacyForm.name" type="text" placeholder="e.g. City Pharmacy"
+                      class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                  <label class="block"><span class="text-xs font-medium text-gray-600">Address</span>
+                    <input v-model="pharmacyForm.address" type="text" placeholder="123, MG Road, City"
+                      class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                  <div class="grid grid-cols-2 gap-3">
+                    <label class="block"><span class="text-xs font-medium text-gray-600">Phone</span>
+                      <input v-model="pharmacyForm.phone" type="tel"
+                        class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                    <label class="block"><span class="text-xs font-medium text-gray-600">Hours</span>
+                      <input v-model="pharmacyForm.hours" type="text" placeholder="9 AM – 9 PM"
+                        class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                  </div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <label class="block"><span class="text-xs font-medium text-gray-600">Distance</span>
+                      <input v-model="pharmacyForm.distance" type="text" placeholder="0.5 km"
+                        class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                    <label class="block"><span class="text-xs font-medium text-gray-600">Rating (0-5)</span>
+                      <input v-model.number="pharmacyForm.rating" type="number" min="0" max="5" step="0.1"
+                        class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                  </div>
+                  <label class="flex items-center gap-2">
+                    <input v-model="pharmacyForm.open" type="checkbox" class="w-4 h-4 accent-green-600" />
+                    <span class="text-sm text-gray-700">Currently open</span>
+                  </label>
+                </div>
+                <div class="flex gap-3 mt-5">
+                  <button @click="showAddPharmacy=false" class="flex-1 py-2.5 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50">Cancel</button>
+                  <button @click="savePharmacyEntry" :disabled="!pharmacyForm.name"
+                    class="flex-1 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white font-bold rounded-xl">
+                    {{ editingPharmacy === null ? 'Add' : 'Save' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Transition>
+
+          <!-- Remove pharmacy confirm -->
+          <Transition name="fade">
+            <div v-if="confirmRemovePharmacyId !== null" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" @click.self="confirmRemovePharmacyId=null">
+              <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+                <div class="text-5xl mb-3">⚠️</div>
+                <h2 class="text-lg font-bold text-gray-900 mb-1">Remove Pharmacy?</h2>
+                <p class="text-sm text-gray-500 mb-5">This cannot be undone.</p>
+                <div class="flex gap-3">
+                  <button @click="confirmRemovePharmacyId=null" class="flex-1 py-2.5 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50">Cancel</button>
+                  <button @click="confirmRemovePharmacy" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl">Remove</button>
+                </div>
+              </div>
+            </div>
+          </Transition>
+        </section>
+
+
+        <!-- ────────────────────────────────────────────────
+             PANEL 7: DOCTORS DATABASE
+             ──────────────────────────────────────────────── -->
+        <section v-if="activePanel === 'doctors'">
+          <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
+            <h1 class="text-2xl font-bold text-gray-900">🩺 Doctors Database</h1>
+            <button @click="openAddDoctor"
+              class="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2.5 rounded-xl text-sm transition">
+              + Add Doctor
+            </button>
+          </div>
+
+          <div v-if="doctorList.length === 0" class="text-center py-12 text-gray-400">
+            <div class="text-5xl mb-3">🩺</div>
+            <p class="text-sm">No doctors in the database yet.</p>
+            <p class="text-xs mt-1">Staff will see doctor names they entered when creating carts.</p>
+          </div>
+
+          <div v-else class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-x-auto mb-4">
+            <table class="min-w-full text-sm">
+              <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+                <tr>
+                  <th class="px-4 py-3 text-left">Doctor</th>
+                  <th class="px-4 py-3 text-left">Specialty</th>
+                  <th class="px-4 py-3 text-left">Clinic</th>
+                  <th class="px-4 py-3 text-left">Phone</th>
+                  <th class="px-4 py-3 text-center">Status</th>
+                  <th class="px-4 py-3 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                <tr v-for="doc in doctorList" :key="doc.id" class="hover:bg-gray-50">
+                  <td class="px-4 py-3 font-medium text-gray-900">{{ doc.name }}</td>
+                  <td class="px-4 py-3 text-gray-500">{{ doc.specialty }}</td>
+                  <td class="px-4 py-3 text-gray-500">{{ doc.clinic }}</td>
+                  <td class="px-4 py-3 text-gray-400">{{ doc.phone }}</td>
+                  <td class="px-4 py-3 text-center">
+                    <span :class="['text-xs font-semibold px-2 py-0.5 rounded-full', doc.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500']">
+                      {{ doc.active ? 'Active' : 'Inactive' }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3 text-center">
+                    <div class="flex items-center justify-center gap-2">
+                      <button @click="openEditDoctor(doc)" class="text-xs text-blue-600 hover:text-blue-800 font-medium px-2 py-1 rounded hover:bg-blue-50">Edit</button>
+                      <button @click="removeDoctor(doc.id)" class="text-xs text-red-500 hover:text-red-700 font-medium px-2 py-1 rounded hover:bg-red-50">Remove</button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Add/Edit Doctor Modal -->
+          <Transition name="fade">
+            <div v-if="showAddDoctor" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" @click.self="showAddDoctor=false">
+              <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+                <h2 class="text-lg font-bold text-gray-900 mb-4">{{ editingDoctor === null ? 'Add Doctor' : 'Edit Doctor' }}</h2>
+                <div class="space-y-3">
+                  <label class="block"><span class="text-xs font-medium text-gray-600">Full Name *</span>
+                    <input v-model="doctorForm.name" type="text" placeholder="Dr. Anita Sharma"
+                      class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                  <label class="block"><span class="text-xs font-medium text-gray-600">Specialty</span>
+                    <input v-model="doctorForm.specialty" type="text" placeholder="General Physician"
+                      class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                  <label class="block"><span class="text-xs font-medium text-gray-600">Clinic / Hospital</span>
+                    <input v-model="doctorForm.clinic" type="text" placeholder="City Clinic, Park Street"
+                      class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                  <label class="block"><span class="text-xs font-medium text-gray-600">Phone</span>
+                    <input v-model="doctorForm.phone" type="tel"
+                      class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                  <label class="flex items-center gap-2">
+                    <input v-model="doctorForm.active" type="checkbox" class="w-4 h-4 accent-green-600" />
+                    <span class="text-sm text-gray-700">Active in system</span>
+                  </label>
+                </div>
+                <div class="flex gap-3 mt-5">
+                  <button @click="showAddDoctor=false" class="flex-1 py-2.5 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50">Cancel</button>
+                  <button @click="saveDoctorEntry" :disabled="!doctorForm.name"
+                    class="flex-1 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white font-bold rounded-xl">
+                    {{ editingDoctor === null ? 'Add Doctor' : 'Save Changes' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Transition>
+
+          <!-- Remove doctor confirm -->
+          <Transition name="fade">
+            <div v-if="confirmRemoveDoctorId !== null" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" @click.self="confirmRemoveDoctorId=null">
+              <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+                <div class="text-5xl mb-3">⚠️</div>
+                <h2 class="text-lg font-bold text-gray-900 mb-1">Remove Doctor?</h2>
+                <p class="text-sm text-gray-500 mb-5">This cannot be undone.</p>
+                <div class="flex gap-3">
+                  <button @click="confirmRemoveDoctorId=null" class="flex-1 py-2.5 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50">Cancel</button>
+                  <button @click="confirmRemoveDoctor" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl">Remove</button>
+                </div>
+              </div>
+            </div>
+          </Transition>
+        </section>
+
+
+        <!-- ────────────────────────────────────────────────
+             PANEL 8: MEDICINE REQUESTS (from staff)
+             ──────────────────────────────────────────────── -->
+        <section v-if="activePanel === 'med_requests'">
+          <h1 class="text-2xl font-bold text-gray-900 mb-2">🆕 New Medicine Requests</h1>
+          <p class="text-sm text-gray-500 mb-5">Pharmacy staff submitted these new medicines for master-database approval.</p>
+
+          <!-- Summary strip -->
+          <div class="grid grid-cols-3 gap-3 mb-5">
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 text-center">
+              <p class="text-2xl font-bold text-amber-600">{{ medRequests.filter(r=>r.status==='pending').length }}</p>
+              <p class="text-xs text-gray-400 mt-0.5">Pending</p>
+            </div>
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 text-center">
+              <p class="text-2xl font-bold text-green-600">{{ medRequests.filter(r=>r.status==='approved').length }}</p>
+              <p class="text-xs text-gray-400 mt-0.5">Approved</p>
+            </div>
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 text-center">
+              <p class="text-2xl font-bold text-red-500">{{ medRequests.filter(r=>r.status==='rejected').length }}</p>
+              <p class="text-xs text-gray-400 mt-0.5">Rejected</p>
+            </div>
+          </div>
+
+          <div v-if="medRequests.length === 0" class="text-center py-12 text-gray-400">
+            <div class="text-5xl mb-3">🆕</div>
+            <p class="text-sm">No medicine requests yet.</p>
+          </div>
+
+          <div v-else class="space-y-3">
+            <div v-for="req in medRequests" :key="req.id"
+              class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 flex items-start gap-4 flex-wrap">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1 flex-wrap">
+                  <p class="font-bold text-gray-900">{{ req.name }}</p>
+                  <span :class="['text-xs font-semibold px-2 py-0.5 rounded-full',
+                    req.status==='pending'  ? 'bg-amber-100 text-amber-700' :
+                    req.status==='approved' ? 'bg-green-100 text-green-700' :
+                                              'bg-red-100 text-red-600']">
+                    {{ req.status }}
+                  </span>
+                </div>
+                <p class="text-xs text-gray-500">{{ req.brand || '—' }} · {{ req.generic || '—' }} · {{ req.category || '—' }}</p>
+                <p class="text-xs text-gray-400 mt-0.5">₹{{ req.price }} · {{ req.gst }}% GST · Requested: {{ req.requestedAt ? new Date(req.requestedAt).toLocaleDateString('en-IN') : '—' }}</p>
+              </div>
+              <div v-if="req.status === 'pending'" class="flex gap-2 shrink-0">
+                <button @click="approveRequest(req)"
+                  class="text-xs bg-green-600 hover:bg-green-700 text-white font-semibold px-3 py-1.5 rounded-lg transition">
+                  ✓ Approve
+                </button>
+                <button @click="rejectRequest(req)"
+                  class="text-xs bg-red-500 hover:bg-red-600 text-white font-semibold px-3 py-1.5 rounded-lg transition">
+                  ✗ Reject
+                </button>
+              </div>
+            </div>
+          </div>
         </section>
 
       </main>

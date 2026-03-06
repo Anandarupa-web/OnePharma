@@ -135,6 +135,11 @@ export default defineComponent({
     });
     const finalTotal = computed(() => +(grossTotal.value - discountAmount.value).toFixed(2));
 
+    /** Discount as percentage of gross total, for display. */
+    const discountPctDisplay = computed(() =>
+      grossTotal.value > 0 ? (discountAmount.value / grossTotal.value * 100).toFixed(1) : '0'
+    );
+
     watch(discountType, () => { discountPct.value = 0; flatFinal.value = grossTotal.value; });
     watch(grossTotal, v => {
       if (discountType.value !== 'percentage') flatFinal.value = +v.toFixed(2);
@@ -148,7 +153,8 @@ export default defineComponent({
     const newMed = reactive({ name: '', brand: '', generic: '', category: '', price: '', gst: 5, images: [] });
 
     function aiIdentify() {
-      // NOTE: AI identification is a mock for Phase 1. Replace with real OCR/AI API in Phase 2.
+      // TODO(Phase 2): Replace with a real AI/OCR API call (e.g., Google Vision or a Flask endpoint)
+      // that analyses packaging images and returns structured medicine details.
       aiLoading.value = true;
       setTimeout(() => {
         Object.assign(newMed, { brand: 'AutoBrand', generic: 'Paracetamol', category: 'Analgesic', price: 22, gst: 5 });
@@ -156,12 +162,12 @@ export default defineComponent({
       }, 1500);
     }
     function handleMedImages(e) {
-      // Revoke previous object URLs to avoid memory leaks before creating new ones.
-      newMed.images.forEach(u => URL.revokeObjectURL(u));
-      newMed.images = Array.from(e.target.files).slice(0, 4).map(f => URL.createObjectURL(f));
+      // Revoke previous object URLs to prevent memory leaks before creating new ones.
+      (newMed.images || []).forEach(u => URL.revokeObjectURL(u));
+      newMed.images = Array.from(e.target.files || []).slice(0, 4).map(f => URL.createObjectURL(f));
     }
     function clearNewMedImages() {
-      newMed.images.forEach(u => URL.revokeObjectURL(u));
+      (newMed.images || []).forEach(u => URL.revokeObjectURL(u));
       newMed.images = [];
     }
     function saveNewMedicine() {
@@ -259,7 +265,7 @@ export default defineComponent({
       cart, removeItem, setQty,
       alternatives, substituteItem,
       discountType, discountPct, flatFinal, adjustGst, setRoundOff, DISCOUNT_TYPES,
-      subtotal, rawGst, gstAmount, grossTotal, discountAmount, finalTotal,
+      subtotal, rawGst, gstAmount, grossTotal, discountAmount, finalTotal, discountPctDisplay,
       showAddMed, aiLoading, addMedMsg, newMed, aiIdentify, handleMedImages, saveNewMedicine, closeAddMed,
       showCheckout, checkoutDone, invoiceNumber, openCheckout, confirmCheckout, newTransaction,
       showScanner, onOcrDone,
@@ -307,10 +313,11 @@ export default defineComponent({
         </div>
         <div v-else class="space-y-2">
           <div class="relative">
-            <input v-model="patientQuery" @focus="showPatientDrop=true" @blur="onPatBlur" @mousedown="cancelPatBlur"
+            <input v-model="patientQuery" @focus="showPatientDrop=true" @blur="onPatBlur"
               placeholder="Search patient by name or phone…"
               class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
             <div v-if="showPatientDrop && patientResults.length"
+              @mousedown="cancelPatBlur"
               class="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-20 mt-1 overflow-hidden">
               <button v-for="p in patientResults" :key="p.id" @mousedown.prevent="selectPatient(p)"
                 class="w-full text-left px-3 py-2 hover:bg-green-50 text-sm border-b last:border-0">
@@ -473,7 +480,7 @@ export default defineComponent({
             <span class="text-xs text-gray-500">of ₹{{ grossTotal.toFixed(2) }}</span>
           </div>
           <p class="text-xs text-green-600">Discount: ₹{{ discountAmount.toFixed(2) }}
-            ({{ grossTotal>0?(discountAmount/grossTotal*100).toFixed(1):0 }}%)</p>
+            ({{ discountPctDisplay }}%)</p>
         </div>
         <!-- Round Off mode -->
         <div v-if="discountType==='roundoff'" class="space-y-2">

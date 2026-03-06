@@ -27,10 +27,11 @@ export default defineComponent({
     const loading  = ref(false);
 
     // ── Demo credentials shown to the tester ─────────────────────────────
+    // Note: All non-admin staff have the same POS functionality (no cashier/pharmacist distinction).
     const demoCreds = [
-      { role: 'Admin / Owner',  email: 'admin@saha.com',  password: 'admin123', badge: 'bg-purple-100 text-purple-700' },
-      { role: 'Cashier',        email: 'raj@saha.com',    password: 'pass123',  badge: 'bg-blue-100 text-blue-700'   },
-      { role: 'Pharmacist',     email: 'amit@saha.com',   password: 'pass123',  badge: 'bg-teal-100 text-teal-700'   },
+      { role: 'Admin / Owner', email: 'admin@saha.com', password: 'admin123', badge: 'bg-purple-100 text-purple-700' },
+      { role: 'Staff',         email: 'raj@saha.com',   password: 'pass123',  badge: 'bg-green-100 text-green-700'  },
+      { role: 'Staff',         email: 'priya@saha.com', password: 'pass123',  badge: 'bg-green-100 text-green-700'  },
     ];
 
     /** Fill form with a demo credential on click. */
