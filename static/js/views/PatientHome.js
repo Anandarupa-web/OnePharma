@@ -691,7 +691,7 @@ export default defineComponent({
         <!-- ── Hero Carousel (fixed-height, absolutely-positioned slides → no layout shift) ── -->
         <div class="relative overflow-hidden" :style="{ height: CAROUSEL_HEIGHT_PX + 'px' }">
           <template v-for="(slide, idx) in HERO_SLIDES" :key="idx">
-            <Transition name="fade">
+            <Transition name="carousel-fade">
               <div v-if="currentSlide === idx"
                 :class="['absolute inset-0', slide.bg, 'text-white px-5 pt-8 pb-6']">
                 <div class="max-w-lg mx-auto flex items-center gap-4 h-full">

@@ -69,10 +69,12 @@ canvas { display: block; max-width: 100%; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 
-/* ── Carousel: fix the .fade transition for absolutely-positioned slides ── */
-/* Slides sit inside position:relative + fixed-height container; no reflow */
-.fade-enter-active { transition: opacity 0.35s ease; }
-.fade-leave-active { transition: opacity 0.35s ease; position: absolute; inset: 0; }
+/* ── Carousel: dedicated 'carousel-fade' transition — slides stay absolutely
+   positioned during leave so the fixed-height container never reflows ── */
+.carousel-fade-enter-active { transition: opacity 0.35s ease; }
+.carousel-fade-leave-active { transition: opacity 0.35s ease; position: absolute; inset: 0; }
+.carousel-fade-enter-from,
+.carousel-fade-leave-to { opacity: 0; }
 
 /* ── Desktop: remove bottom padding compensation that was for bottom nav ── */
 @media (min-width: 768px) {
