@@ -26,6 +26,12 @@ export default defineComponent({
 
   setup() {
 
+    // ── Named constants ────────────────────────────────────────────────────
+    /** Stock below minStock × STOCK_WARNING_RATIO triggers amber warning. */
+    const STOCK_WARNING_RATIO = 1.2;
+    /** Estimated purchase price ≈ PURCHASE_COST_RATIO × selling price. */
+    const PURCHASE_COST_RATIO = 0.7;
+
     // ── Core reactive data ─────────────────────────────────────────────────
     const activePanel = ref('overview');
     const inventory   = ref(getInventory());
@@ -46,8 +52,7 @@ export default defineComponent({
     /** Maximum inventory rows rendered before the user is prompted to search. */
     const INVENTORY_PAGE_SIZE = 20;
 
-    /** Estimated purchase cost as a fraction of retail price (used for supplier report). */
-    const PURCHASE_COST_RATIO = 0.7;
+    // Note: PURCHASE_COST_RATIO is defined at the top of setup() above.
 
     // ── Auto-expire stale patient-cart orders on mount ─────────────────────
     onMounted(() => {
@@ -153,7 +158,7 @@ export default defineComponent({
     const stockCellCls = (med) => {
       if (med.stock === 0)              return 'text-red-600 font-bold';
       if (med.stock < med.minStock)     return 'text-red-500 font-semibold';
-      if (med.stock < med.minStock * 1.2) return 'text-amber-600 font-semibold';
+      if (med.stock < med.minStock * STOCK_WARNING_RATIO) return 'text-amber-600 font-semibold';
       return 'text-green-700 font-semibold';
     };
 

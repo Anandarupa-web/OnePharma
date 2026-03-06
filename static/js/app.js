@@ -12,10 +12,11 @@
 import { createApp, ref, reactive, provide, onMounted, onUnmounted } from 'vue';
 
 // ── Page-level view imports ──────────────────────────────────────────────────
-import AdminDashboard from './views/AdminDashboard.js';
-import StaffPos       from './views/StaffPos.js';
-import PatientHome    from './views/PatientHome.js';
-import LoginPage      from './views/LoginPage.js';
+import AdminDashboard     from './views/AdminDashboard.js';
+import PharmacyDashboard  from './views/PharmacyDashboard.js';
+import StaffPos           from './views/StaffPos.js';
+import PatientHome        from './views/PatientHome.js';
+import LoginPage          from './views/LoginPage.js';
 
 // ── Shared component imports ─────────────────────────────────────────────────
 import Navbar from './components/Navbar.js';
@@ -66,21 +67,18 @@ const DEFAULT_PHARMACY_INVENTORIES = {
 };
 
 /**
- * Staff accounts for Saha Pharmacy.
- * Passwords are only used for the simulated login; they are NEVER stored in op_auth.
- * Roles: 'admin' (owner), 'cashier' (billing), 'pharmacist' (dispensing).
- */
-/**
- * Staff accounts for Saha Pharmacy.
- * Role 'admin' → AdminDashboard; role 'staff' → StaffPos (POS).
- * All non-admin staff have identical POS access (no cashier/pharmacist split).
+ * Hierarchy: app_admin (OnePharma devs) > pharmacist (pharmacy owner) > staff (pharmacy employees)
+ *   app_admin   → AdminDashboard   (OnePharma developers — supreme admin)
+ *   pharmacist  → PharmacyDashboard (pharmacy owner/manager, e.g. Suresh Saha)
+ *   staff       → StaffPos          (pharmacy employees — POS / billing)
  */
 const DEFAULT_STAFF = [
-  { id: 1, name: 'Suresh Saha',  email: 'admin@saha.com',  password: 'admin123', role: 'admin', phone: '+91-98765-00001', joinDate: '2022-06-01', active: true,  avatar: 'SS' },
-  { id: 2, name: 'Raj Kumar',    email: 'raj@saha.com',    password: 'pass123',  role: 'staff', phone: '+91-98765-00002', joinDate: '2023-03-15', active: true,  avatar: 'RK' },
-  { id: 3, name: 'Priya Singh',  email: 'priya@saha.com',  password: 'pass123',  role: 'staff', phone: '+91-98765-00003', joinDate: '2023-08-20', active: true,  avatar: 'PS' },
-  { id: 4, name: 'Dr. Amit Dev', email: 'amit@saha.com',   password: 'pass123',  role: 'staff', phone: '+91-98765-00004', joinDate: '2023-01-10', active: false, avatar: 'AD' },
-  { id: 5, name: 'Meena Rao',    email: 'meena@saha.com',  password: 'pass123',  role: 'staff', phone: '+91-98765-00005', joinDate: '2024-01-05', active: true,  avatar: 'MR' },
+  { id: 0, name: 'OnePharma Admin',  email: 'admin@onepharma.com', password: 'appadmin123', role: 'app_admin',  phone: '+91-99999-00000', joinDate: '2024-01-01', active: true,  avatar: 'OP', pharmacyId: null },
+  { id: 1, name: 'Suresh Saha',      email: 'owner@saha.com',      password: 'owner123',    role: 'pharmacist', phone: '+91-98765-00001', joinDate: '2022-06-01', active: true,  avatar: 'SS', pharmacyId: 1    },
+  { id: 2, name: 'Raj Kumar',        email: 'raj@saha.com',        password: 'pass123',     role: 'staff',      phone: '+91-98765-00002', joinDate: '2023-03-15', active: true,  avatar: 'RK', pharmacyId: 1    },
+  { id: 3, name: 'Priya Singh',      email: 'priya@saha.com',      password: 'pass123',     role: 'staff',      phone: '+91-98765-00003', joinDate: '2023-08-20', active: true,  avatar: 'PS', pharmacyId: 1    },
+  { id: 4, name: 'Dr. Amit Dev',     email: 'amit@saha.com',       password: 'pass123',     role: 'staff',      phone: '+91-98765-00004', joinDate: '2023-01-10', active: false, avatar: 'AD', pharmacyId: 1    },
+  { id: 5, name: 'Meena Rao',        email: 'meena@saha.com',      password: 'pass123',     role: 'staff',      phone: '+91-98765-00005', joinDate: '2024-01-05', active: true,  avatar: 'MR', pharmacyId: 1    },
 ];
 
 /**
@@ -189,7 +187,45 @@ const seedLocalStorage = () => {
     localStorage.setItem('op_carts',       JSON.stringify([]));
   }
   if (!localStorage.getItem('op_orders')) {
-    localStorage.setItem('op_orders',      JSON.stringify([]));
+    const now = new Date();
+    const inXh = (h) => new Date(now.getTime() + h * 3600000).toISOString();
+    const inXd = (d) => new Date(now.getTime() + d * 86400000).toISOString();
+    const agoXh = (h) => new Date(now.getTime() - h * 3600000).toISOString();
+    const DEFAULT_ORDERS = [
+      {
+        id: 'ORD-000001', patientName: 'Arjun Sharma', patientPhone: '+91-90001-11111',
+        doctorName: '', source: 'patient_cart',
+        items: [{ name: 'Paracetamol 500mg', qty: 2, price: 18, gst: 5 }, { name: 'Cetirizine 10mg', qty: 1, price: 28, gst: 5 }],
+        subtotal: 64, gstAmount: 3.2, discountAmount: 0, finalTotal: 67.2,
+        status: 'pending', createdAt: agoXh(2),
+        expiresAt: inXh(22),
+      },
+      {
+        id: 'ORD-000002', patientName: 'Priya Das', patientPhone: '+91-90002-22222',
+        doctorName: 'Dr. R. Mehta', source: 'doctor_prescription',
+        items: [{ name: 'Amoxicillin 250mg', qty: 1, price: 85, gst: 12 }, { name: 'Pantoprazole 40mg', qty: 1, price: 78, gst: 5 }],
+        subtotal: 163, gstAmount: 14.1, discountAmount: 0, finalTotal: 177.1,
+        status: 'pending', createdAt: agoXh(48),
+        expiresAt: inXd(28),
+      },
+      {
+        id: 'ORD-000003', patientName: 'Ravi Verma', patientPhone: '+91-90003-33333',
+        doctorName: 'Dr. A. Sen', source: 'doctor_prescription',
+        items: [{ name: 'Metformin 500mg', qty: 3, price: 42, gst: 5 }, { name: 'Atorvastatin 10mg', qty: 1, price: 110, gst: 12 }],
+        subtotal: 236, gstAmount: 19.5, discountAmount: 10, finalTotal: 245.5,
+        status: 'pending', createdAt: agoXh(24),
+        expiresAt: inXd(29),
+      },
+      {
+        id: 'ORD-000004', patientName: 'Sunita Pal', patientPhone: '+91-90004-44444',
+        doctorName: '', source: 'patient_cart',
+        items: [{ name: 'Ibuprofen 400mg', qty: 2, price: 35, gst: 5 }],
+        subtotal: 70, gstAmount: 3.5, discountAmount: 5, finalTotal: 68.5,
+        status: 'completed', createdAt: agoXh(72),
+        expiresAt: null,
+      },
+    ];
+    localStorage.setItem('op_orders', JSON.stringify(DEFAULT_ORDERS));
   }
   if (!localStorage.getItem('op_doctors')) {
     localStorage.setItem('op_doctors',     JSON.stringify(DEFAULT_DOCTORS));
@@ -207,6 +243,7 @@ export const getDosageSlips     = () => JSON.parse(localStorage.getItem('op_dosa
 export const getSlots           = () => JSON.parse(localStorage.getItem('op_slots')        || '[]');
 export const saveSlots          = (d) => localStorage.setItem('op_slots', JSON.stringify(d));
 export const getPharmacies      = () => JSON.parse(localStorage.getItem('op_pharmacies')   || '[]');
+export const savePharmacies     = (d) => localStorage.setItem('op_pharmacies', JSON.stringify(d));
 export const getPharmacyInv     = () => JSON.parse(localStorage.getItem('op_pharmacy_inv') || '{}');
 export const getStaff           = () => JSON.parse(localStorage.getItem('op_staff')        || '[]');
 export const saveStaff          = (d) => localStorage.setItem('op_staff', JSON.stringify(d));
@@ -256,7 +293,11 @@ export const clearAuth = () => localStorage.removeItem('op_auth');
  * can use the same colour scheme without duplication.
  */
 export const roleBadgeClass = (role) => {
-  const map = { admin: 'bg-purple-100 text-purple-700', staff: 'bg-green-100 text-green-700' };
+  const map = {
+    app_admin:  'bg-purple-100 text-purple-800',
+    pharmacist: 'bg-indigo-100 text-indigo-700',
+    staff:      'bg-green-100  text-green-700',
+  };
   return map[role] || 'bg-gray-100 text-gray-700';
 };
 
@@ -267,7 +308,7 @@ export const roleBadgeClass = (role) => {
 const App = {
   name: 'App',
 
-  components: { Navbar, AdminDashboard, StaffPos, PatientHome, LoginPage },
+  components: { Navbar, AdminDashboard, PharmacyDashboard, StaffPos, PatientHome, LoginPage },
 
   setup() {
     /** The currently active portal view name. */
@@ -310,13 +351,14 @@ const App = {
         window.location.hash = '';
         return;
       }
-      const protected_ = { StaffPos: true, AdminDashboard: true };
+      const protected_ = { StaffPos: true, AdminDashboard: true, PharmacyDashboard: true };
       if (protected_[id] && !currentUser.value) {
         pendingView.value = id;
         currentView.value = 'LoginPage';
         return;
       }
-      if (id === 'AdminDashboard' && currentUser.value && currentUser.value.role !== 'admin') return;
+      if (id === 'AdminDashboard' && currentUser.value && currentUser.value.role !== 'app_admin') return;
+      if (id === 'PharmacyDashboard' && currentUser.value && !['app_admin','pharmacist'].includes(currentUser.value.role)) return;
       currentView.value = id;
     };
 
@@ -324,7 +366,8 @@ const App = {
     const handleLogin = (user) => {
       saveAuth(user);
       currentUser.value = { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar };
-      const target = pendingView.value || (user.role === 'admin' ? 'AdminDashboard' : 'StaffPos');
+      const roleRoutes = { app_admin: 'AdminDashboard', pharmacist: 'PharmacyDashboard', staff: 'StaffPos' };
+      const target = pendingView.value || roleRoutes[user.role] || 'StaffPos';
       pendingView.value = null;
       switchView(target);
     };
@@ -419,20 +462,27 @@ const App = {
               <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">For Professionals</h3>
               <ul class="space-y-2 text-sm">
                 <li>
+                  <a href="#pharmacy" class="hover:text-white transition flex items-center gap-2">
+                    <span class="bg-indigo-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">Owner</span>
+                    Pharmacy Owner Login
+                  </a>
+                </li>
+                <li>
                   <a href="#staff" class="hover:text-white transition flex items-center gap-2">
-                    <span class="bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">Staff</span>
+                    <span class="bg-green-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">Staff</span>
                     Pharmacy Staff Login
                   </a>
                 </li>
                 <li>
                   <a href="#admin" class="hover:text-white transition flex items-center gap-2">
-                    <span class="bg-purple-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">Admin</span>
-                    Admin / Owner Dashboard
+                    <span class="bg-purple-800 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">Admin</span>
+                    OnePharma App Admin
                   </a>
                 </li>
                 <li class="text-xs text-gray-500 pt-1">
-                  Navigate to <code class="bg-gray-800 px-1.5 py-0.5 rounded">#staff</code> or
-                  <code class="bg-gray-800 px-1.5 py-0.5 rounded">#admin</code> in the URL
+                  Append <code class="bg-gray-800 px-1 rounded">#pharmacy</code>,
+                  <code class="bg-gray-800 px-1 rounded">#staff</code> or
+                  <code class="bg-gray-800 px-1 rounded">#admin</code> to the URL
                 </li>
               </ul>
             </div>

@@ -2,7 +2,7 @@
  * Navbar.js – Top navigation bar (redesigned)
  *
  * Props:
- *   currentView   – 'PatientHome' | 'StaffPos' | 'AdminDashboard' | 'LoginPage'
+ *   currentView   – 'PatientHome' | 'StaffPos' | 'AdminDashboard' | 'PharmacyDashboard' | 'LoginPage'
  *   staffUser     – null when guest/patient, or { name, role, avatar } when staff auth
  *   patientBridge – shared reactive bridge object (user, cartCount, city, activeTab, …)
  *
@@ -232,12 +232,15 @@ export default defineComponent({
           <!-- ── Staff / Admin portal: user chip + logout ── -->
           <template v-else-if="staffUser">
             <div class="flex items-center gap-2">
-              <span class="w-7 h-7 rounded-full bg-green-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
+              <span :class="['w-7 h-7 rounded-full text-white text-xs font-bold flex items-center justify-center shrink-0',
+                staffUser.role==='app_admin' ? 'bg-purple-700' : staffUser.role==='pharmacist' ? 'bg-indigo-600' : 'bg-green-600']">
                 {{ staffUser.avatar }}
               </span>
               <div class="hidden sm:block text-left">
                 <p class="text-xs font-semibold text-gray-800 leading-tight">{{ staffUser.name }}</p>
-                <span :class="['text-[10px] px-1.5 py-0.5 rounded font-medium', roleBadge]">{{ staffUser.role }}</span>
+                <span :class="['text-[10px] px-1.5 py-0.5 rounded font-medium', roleBadge]">
+                  {{ staffUser.role === 'app_admin' ? 'App Admin' : staffUser.role === 'pharmacist' ? 'Pharmacy Owner' : 'Staff' }}
+                </span>
               </div>
               <button
                 @click="$emit('staff-logout')"
@@ -252,8 +255,9 @@ export default defineComponent({
           <!-- ── Guest in staff/login view ── -->
           <template v-else-if="!isPatient">
             <span class="hidden sm:inline text-xs text-gray-400">
-              Navigate to <code class="bg-gray-100 px-1 rounded">/index.html#staff</code> or
-              <code class="bg-gray-100 px-1 rounded">/index.html#admin</code>
+              Go to <code class="bg-gray-100 px-1 rounded">#pharmacy</code>,
+              <code class="bg-gray-100 px-1 rounded">#staff</code> or
+              <code class="bg-gray-100 px-1 rounded">#admin</code>
             </span>
           </template>
 

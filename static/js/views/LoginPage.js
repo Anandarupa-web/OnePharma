@@ -27,11 +27,11 @@ export default defineComponent({
     const loading  = ref(false);
 
     // ── Demo credentials shown to the tester ─────────────────────────────
-    // Note: All non-admin staff have the same POS functionality (no cashier/pharmacist distinction).
+    // Hierarchy: app_admin (OnePharma devs) > pharmacist (pharmacy owner) > staff (employees)
     const demoCreds = [
-      { role: 'Admin / Owner', email: 'admin@saha.com', password: 'admin123', badge: 'bg-purple-100 text-purple-700' },
-      { role: 'Staff',         email: 'raj@saha.com',   password: 'pass123',  badge: 'bg-green-100 text-green-700'  },
-      { role: 'Staff',         email: 'priya@saha.com', password: 'pass123',  badge: 'bg-green-100 text-green-700'  },
+      { role: 'App Admin',       email: 'admin@onepharma.com', password: 'appadmin123', badge: 'bg-purple-100 text-purple-700', hint: '→ OnePharma Admin Dashboard' },
+      { role: 'Pharmacy Owner',  email: 'owner@saha.com',      password: 'owner123',    badge: 'bg-indigo-100 text-indigo-700', hint: '→ Saha Pharmacy Dashboard'    },
+      { role: 'Staff',           email: 'raj@saha.com',        password: 'pass123',     badge: 'bg-green-100 text-green-700',  hint: '→ Staff POS'                  },
     ];
 
     /** Fill form with a demo credential on click. */
@@ -179,11 +179,12 @@ export default defineComponent({
               @click="fillDemo(cred)"
               class="w-full flex items-center justify-between bg-gray-50 hover:bg-gray-100 rounded-xl px-4 py-2.5 text-left transition"
             >
-              <div>
+              <div class="flex-1 min-w-0">
                 <span :class="['text-xs px-2 py-0.5 rounded font-semibold', cred.badge]">{{ cred.role }}</span>
-                <p class="text-xs text-gray-500 mt-0.5">{{ cred.email }}</p>
+                <p class="text-xs text-gray-500 mt-0.5 truncate">{{ cred.email }}</p>
+                <p v-if="cred.hint" class="text-[10px] text-gray-400 mt-0.5">{{ cred.hint }}</p>
               </div>
-              <span class="text-xs text-gray-400 font-mono">{{ cred.password }}</span>
+              <span class="text-xs text-gray-400 font-mono ml-2 shrink-0">{{ cred.password }}</span>
             </button>
           </div>
           <p class="text-[10px] text-gray-400 mt-3 text-center">
