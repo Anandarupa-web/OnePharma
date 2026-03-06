@@ -45,14 +45,24 @@ export default defineComponent({
       // Staff mode: simulate OCR processing with a 2-second delay
       if (props.mode === 'staff') {
         processing.value = true;
+
+        // Vary the OCR result slightly using a hash of the file name so repeated
+        // uploads of different prescriptions give different-looking extractions.
+        const ALL_DRUGS = [
+          'Paracetamol 500mg', 'Amoxicillin 250mg', 'Omeprazole 20mg',
+          'Metformin 500mg',   'Cetirizine 10mg',   'Ibuprofen 400mg',
+          'Azithromycin 500mg','Pantoprazole 40mg', 'Atorvastatin 10mg',
+        ];
+        const seed = (file.name.length * 7 + file.size) % ALL_DRUGS.length;
+        const picked = [
+          ALL_DRUGS[seed % ALL_DRUGS.length],
+          ALL_DRUGS[(seed + 2) % ALL_DRUGS.length],
+          ALL_DRUGS[(seed + 4) % ALL_DRUGS.length],
+        ];
+
         setTimeout(() => {
           processing.value = false;
-          // Mock OCR result – realistic drug names extracted from a handwritten Rx
-          emit('ocr-done', [
-            'Paracetamol 500mg',
-            'Amoxicillin 250mg',
-            'Omeprazole 20mg',
-          ]);
+          emit('ocr-done', picked);
           close();
         }, 2200);
       }

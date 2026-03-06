@@ -107,7 +107,7 @@ export default defineComponent({
       topChart = new Chart(topCanvas, {
         type: 'bar',
         data: {
-          labels: topMedicines.value.map((m) => m.name.split(' ').slice(0, 2).join(' ')),
+          labels: topMedicines.value.map((m) => m.name.length > 16 ? m.name.slice(0, 15) + '…' : m.name),
           datasets: [{
             label:           'Units Sold',
             data:            topMedicines.value.map((m) => m.unitsSold),

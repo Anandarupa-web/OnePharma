@@ -398,7 +398,7 @@ export default defineComponent({
                 <div class="flex flex-col gap-2">
                   <button
                     class="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition flex items-center justify-center gap-2"
-                    @click="() => {}"
+                    @click="() => alert('PDF download will be available once the Flask backend is integrated in Phase 2.')"
                   >
                     <span>📄</span> Download PDF Invoice
                   </button>
