@@ -9,9 +9,9 @@
  *  3. Inventory  – Full inventory table with live stock indicators
  *  4. Supplier   – Report generator with date filters and CSV/PDF simulation
  */
-import { defineComponent, ref, computed, onMounted, watch, nextTick } from 'vue';
+import { defineComponent, ref, computed, onMounted, watch, nextTick, reactive } from 'vue';
 import StockAlertCard from '../components/StockAlertCard.js';
-import { getInventory, getSalesData } from '../app.js';
+import { getInventory, getSalesData, getStaff, saveStaff } from '../app.js';
 
 export default defineComponent({
   name: 'AdminDashboard',
@@ -40,7 +40,69 @@ export default defineComponent({
       { id: 'alerts',    icon: '🔔', label: 'Alerts'     },
       { id: 'inventory', icon: '📦', label: 'Inventory'  },
       { id: 'supplier',  icon: '📋', label: 'Supplier'   },
+      { id: 'staff',     icon: '👥', label: 'Staff'      },
     ];
+
+    // ── Staff Management state ─────────────────────────────────────────────
+    const staffList    = ref(getStaff());
+    const showAddStaff = ref(false);
+    const editingStaff = ref(null);   // null = new, object = editing existing
+
+    const blankForm = () => ({ name: '', email: '', password: '', role: 'cashier', phone: '', active: true });
+    const staffForm = reactive(blankForm());
+
+    const ROLES = ['admin', 'cashier', 'pharmacist'];
+
+    const roleBadge = (role) => {
+      const map = { admin: 'bg-purple-100 text-purple-700', cashier: 'bg-blue-100 text-blue-700', pharmacist: 'bg-teal-100 text-teal-700' };
+      return map[role] || 'bg-gray-100 text-gray-700';
+    };
+
+    /** Open the Add Staff form (blank). */
+    const openAddForm = () => {
+      Object.assign(staffForm, blankForm());
+      editingStaff.value = null;
+      showAddStaff.value = true;
+    };
+
+    /** Open the Edit Staff form pre-filled. */
+    const openEditForm = (member) => {
+      Object.assign(staffForm, { ...member });
+      editingStaff.value = member.id;
+      showAddStaff.value = true;
+    };
+
+    /** Save new or edited staff record. */
+    const saveStaffMember = () => {
+      if (!staffForm.name || !staffForm.email) return;
+
+      if (editingStaff.value === null) {
+        // Add new staff member
+        const newId = Math.max(0, ...staffList.value.map((s) => s.id)) + 1;
+        const avatar = staffForm.name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+        staffList.value.push({ ...staffForm, id: newId, avatar, joinDate: new Date().toISOString().split('T')[0] });
+      } else {
+        // Update existing
+        const idx = staffList.value.findIndex((s) => s.id === editingStaff.value);
+        if (idx !== -1) Object.assign(staffList.value[idx], staffForm);
+      }
+
+      saveStaff(staffList.value);
+      showAddStaff.value = false;
+    };
+
+    /** Toggle a staff member's active status. */
+    const toggleActive = (member) => {
+      member.active = !member.active;
+      saveStaff(staffList.value);
+    };
+
+    /** Remove a staff member (with confirmation). */
+    const removeMember = (id) => {
+      if (!confirm('Remove this staff member? This cannot be undone.')) return;
+      staffList.value = staffList.value.filter((s) => s.id !== id);
+      saveStaff(staffList.value);
+    };
 
     // ── Derived alert lists ────────────────────────────────────────────────
     /** Medicines below minimum stock threshold. */
@@ -156,6 +218,9 @@ export default defineComponent({
       lowStockAlerts, expiryAlerts, topMedicines,
       reportFrom, reportTo, reportGenerated, reportMsg, generateReport,
       totalRevenue, totalAlerts, totalItems,
+      // Staff management
+      staffList, showAddStaff, staffForm, editingStaff, ROLES,
+      roleBadge, openAddForm, openEditForm, saveStaffMember, toggleActive, removeMember,
     };
   },
 
@@ -203,7 +268,7 @@ export default defineComponent({
       </aside>
 
       <!-- Mobile tab-bar (sm and below) -->
-      <div class="sm:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 grid grid-cols-4 no-print">
+      <div class="sm:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 grid grid-cols-5 no-print">
         <button
           v-for="item in navItems"
           :key="item.id"
@@ -496,6 +561,176 @@ export default defineComponent({
               </tbody>
             </table>
           </div>
+        </section>
+
+
+        <!-- ────────────────────────────────────────────────
+             PANEL 5: STAFF MANAGEMENT
+             ──────────────────────────────────────────────── -->
+        <section v-if="activePanel === 'staff'">
+          <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
+            <h1 class="text-2xl font-bold text-gray-900">👥 Staff Management</h1>
+            <button
+              @click="openAddForm"
+              class="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2.5 rounded-xl text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
+            >
+              + Add Staff Member
+            </button>
+          </div>
+
+          <!-- KPI strip -->
+          <div class="grid grid-cols-3 gap-3 mb-5">
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 text-center">
+              <p class="text-2xl font-bold text-gray-800">{{ staffList.length }}</p>
+              <p class="text-xs text-gray-400 mt-0.5">Total Staff</p>
+            </div>
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 text-center">
+              <p class="text-2xl font-bold text-green-700">{{ staffList.filter(s => s.active).length }}</p>
+              <p class="text-xs text-gray-400 mt-0.5">Active</p>
+            </div>
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 text-center">
+              <p class="text-2xl font-bold text-red-500">{{ staffList.filter(s => !s.active).length }}</p>
+              <p class="text-xs text-gray-400 mt-0.5">Inactive</p>
+            </div>
+          </div>
+
+          <!-- Staff table -->
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-x-auto">
+            <table class="min-w-full text-sm">
+              <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+                <tr>
+                  <th class="px-4 py-3 text-left">Staff Member</th>
+                  <th class="px-4 py-3 text-left">Role</th>
+                  <th class="px-4 py-3 text-left">Email</th>
+                  <th class="px-4 py-3 text-left">Phone</th>
+                  <th class="px-4 py-3 text-left">Joined</th>
+                  <th class="px-4 py-3 text-center">Status</th>
+                  <th class="px-4 py-3 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                <tr
+                  v-for="member in staffList"
+                  :key="member.id"
+                  :class="['hover:bg-gray-50', !member.active ? 'opacity-60' : '']"
+                >
+                  <!-- Avatar + name -->
+                  <td class="px-4 py-3">
+                    <div class="flex items-center gap-2">
+                      <span class="w-8 h-8 rounded-full bg-green-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                        {{ member.avatar }}
+                      </span>
+                      <span class="font-medium text-gray-900">{{ member.name }}</span>
+                    </div>
+                  </td>
+                  <!-- Role badge -->
+                  <td class="px-4 py-3">
+                    <span :class="['text-xs px-2 py-0.5 rounded font-semibold', roleBadge(member.role)]">
+                      {{ member.role }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3 text-gray-600">{{ member.email }}</td>
+                  <td class="px-4 py-3 text-gray-500">{{ member.phone }}</td>
+                  <td class="px-4 py-3 text-gray-400 text-xs">{{ member.joinDate }}</td>
+                  <!-- Active toggle -->
+                  <td class="px-4 py-3 text-center">
+                    <button
+                      @click="toggleActive(member)"
+                      :class="[
+                        'text-xs font-semibold px-3 py-1 rounded-full transition',
+                        member.active
+                          ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      ]"
+                    >
+                      {{ member.active ? 'Active' : 'Inactive' }}
+                    </button>
+                  </td>
+                  <!-- Actions -->
+                  <td class="px-4 py-3 text-center">
+                    <div class="flex items-center justify-center gap-2">
+                      <button
+                        @click="openEditForm(member)"
+                        class="text-xs text-blue-600 hover:text-blue-800 font-medium px-2 py-1 rounded hover:bg-blue-50 transition"
+                      >Edit</button>
+                      <button
+                        @click="removeMember(member.id)"
+                        class="text-xs text-red-500 hover:text-red-700 font-medium px-2 py-1 rounded hover:bg-red-50 transition"
+                      >Remove</button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Add / Edit Staff Modal -->
+          <Transition name="fade">
+            <div
+              v-if="showAddStaff"
+              class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+              @click.self="showAddStaff = false"
+            >
+              <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+                <h2 class="text-lg font-bold text-gray-900 mb-4">
+                  {{ editingStaff === null ? 'Add New Staff Member' : 'Edit Staff Member' }}
+                </h2>
+
+                <div class="space-y-3">
+                  <label class="block">
+                    <span class="text-xs font-medium text-gray-600">Full Name *</span>
+                    <input v-model="staffForm.name" type="text" placeholder="e.g. Riya Gupta"
+                      class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" />
+                  </label>
+
+                  <label class="block">
+                    <span class="text-xs font-medium text-gray-600">Email *</span>
+                    <input v-model="staffForm.email" type="email" placeholder="riya@saha.com"
+                      class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" />
+                  </label>
+
+                  <label class="block">
+                    <span class="text-xs font-medium text-gray-600">Password {{ editingStaff !== null ? '(leave blank to keep current)' : '*' }}</span>
+                    <input v-model="staffForm.password" type="password" placeholder="••••••••"
+                      class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" />
+                  </label>
+
+                  <label class="block">
+                    <span class="text-xs font-medium text-gray-600">Phone</span>
+                    <input v-model="staffForm.phone" type="tel" placeholder="+91-98765-XXXXX"
+                      class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" />
+                  </label>
+
+                  <label class="block">
+                    <span class="text-xs font-medium text-gray-600">Role</span>
+                    <select v-model="staffForm.role"
+                      class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none bg-white">
+                      <option v-for="r in ROLES" :key="r" :value="r">{{ r.charAt(0).toUpperCase() + r.slice(1) }}</option>
+                    </select>
+                  </label>
+
+                  <label class="flex items-center gap-2 mt-1">
+                    <input v-model="staffForm.active" type="checkbox" class="w-4 h-4 accent-green-600" />
+                    <span class="text-sm text-gray-700">Account active (can log in)</span>
+                  </label>
+                </div>
+
+                <div class="flex gap-3 mt-5">
+                  <button
+                    @click="showAddStaff = false"
+                    class="flex-1 py-2.5 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition"
+                  >Cancel</button>
+                  <button
+                    @click="saveStaffMember"
+                    :disabled="!staffForm.name || !staffForm.email"
+                    class="flex-1 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold rounded-xl transition"
+                  >
+                    {{ editingStaff === null ? 'Add Staff' : 'Save Changes' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Transition>
         </section>
 
       </main>

@@ -6,14 +6,16 @@
  * Architecture note:
  *   • All "database" interactions read/write localStorage so the app is 100 % serverless.
  *   • In Phase 2 this layer will be replaced by Axios calls to Flask REST endpoints.
+ *   • Auth state is held in localStorage under 'op_auth' (no passwords stored there).
  */
 
-import { createApp, ref, reactive, provide, computed } from 'vue';
+import { createApp, ref, provide, computed } from 'vue';
 
 // ── Page-level view imports ──────────────────────────────────────────────────
 import AdminDashboard from './views/AdminDashboard.js';
 import StaffPos       from './views/StaffPos.js';
 import PatientHome    from './views/PatientHome.js';
+import LoginPage      from './views/LoginPage.js';
 
 // ── Shared component imports ─────────────────────────────────────────────────
 import Navbar from './components/Navbar.js';
@@ -39,6 +41,41 @@ const DEFAULT_INVENTORY = [
   { id: 13, name: 'Salbutamol 100mcg',     brand: 'Asthalin',     generic: 'Salbutamol',      ingredient: 'Salbutamol',  category: 'Bronchodilator',  stock: 45,  minStock: 20,  price: 155,  gst: 12, expiry: '2026-06-14', supplier: 'HealthCo',    unitsSold: 110 },
   { id: 14, name: 'Insulin Glargine 100U', brand: 'Lantus',       generic: 'Insulin Glargine',ingredient: 'Insulin',     category: 'Antidiabetic',    stock: 8,   minStock: 15,  price: 1250, gst: 5,  expiry: '2025-05-01', supplier: 'ColdChainPh', unitsSold: 60  },
   { id: 15, name: 'Vitamin D3 1000IU',     brand: 'D-Rise',       generic: 'Cholecalciferol', ingredient: 'Vit D3',      category: 'Supplement',      stock: 300, minStock: 60,  price: 55,   gst: 0,  expiry: '2027-03-31', supplier: 'NutriLab',    unitsSold: 340 },
+];
+
+/**
+ * Nearby pharmacies – simulates a geo-search result.
+ * In Phase 2 this will be a Flask API call with the user's coordinates.
+ */
+const DEFAULT_PHARMACIES = [
+  { id: 1, name: 'Saha Pharmacy',    address: '12, MG Road, Kolkata – 700001',              distance: '0.3 km', rating: 4.5, totalRatings: 128, open: true,  phone: '+91-98765-43210', hours: '8 AM – 10 PM' },
+  { id: 2, name: 'MedPlus',          address: '45, Park Street, Kolkata – 700016',           distance: '1.1 km', rating: 4.2, totalRatings: 214, open: true,  phone: '+91-98765-12345', hours: '9 AM – 9 PM'  },
+  { id: 3, name: 'Apollo Pharmacy',  address: '78, Rashbehari Ave, Kolkata – 700029',        distance: '2.0 km', rating: 4.7, totalRatings: 356, open: false, phone: '+91-98765-67890', hours: '8 AM – 11 PM' },
+  { id: 4, name: 'LifeCare Pharmacy',address: '3, Sector V, Salt Lake, Kolkata – 700091',   distance: '3.5 km', rating: 4.0, totalRatings: 87,  open: true,  phone: '+91-98765-11111', hours: '10 AM – 8 PM' },
+];
+
+/**
+ * Per-pharmacy stock levels – { pharmacyId: { medicineId: { stock, price } } }.
+ * Pharmacy 1 mirrors the main inventory; others have variations to simulate reality.
+ */
+const DEFAULT_PHARMACY_INVENTORIES = {
+  1: { 1:{s:240,p:18}, 2:{s:30,p:85},   3:{s:180,p:42},  4:{s:95,p:110},  5:{s:150,p:65},  6:{s:12,p:195},  7:{s:200,p:28}, 8:{s:175,p:35}, 9:{s:60,p:120},  10:{s:85,p:90},  11:{s:130,p:78}, 12:{s:20,p:145}, 13:{s:45,p:155},  14:{s:8,p:1250},  15:{s:300,p:55} },
+  2: { 1:{s:85,p:20},  2:{s:0,p:88},    3:{s:200,p:40},  4:{s:50,p:115},  5:{s:90,p:68},   6:{s:0,p:199},   7:{s:150,p:30}, 8:{s:120,p:38}, 9:{s:0,p:125},   10:{s:60,p:95},  11:{s:80,p:82},  12:{s:0,p:150},  13:{s:30,p:160},  14:{s:5,p:1299},  15:{s:200,p:58} },
+  3: { 1:{s:180,p:17}, 2:{s:60,p:82},   3:{s:150,p:44},  4:{s:80,p:108},  5:{s:200,p:62},  6:{s:25,p:192},  7:{s:250,p:26}, 8:{s:200,p:33}, 9:{s:40,p:118},  10:{s:100,p:88}, 11:{s:110,p:76}, 12:{s:35,p:142}, 13:{s:55,p:152},  14:{s:12,p:1220}, 15:{s:400,p:52} },
+  4: { 1:{s:120,p:19}, 2:{s:20,p:90},   3:{s:90,p:45},   4:{s:0,p:112},   5:{s:60,p:70},   6:{s:0,p:200},   7:{s:80,p:32},  8:{s:100,p:37}, 9:{s:20,p:122},  10:{s:0,p:92},   11:{s:50,p:80},  12:{s:0,p:148},  13:{s:0,p:158},   14:{s:0,p:1280},  15:{s:150,p:57} },
+};
+
+/**
+ * Staff accounts for Saha Pharmacy.
+ * Passwords are only used for the simulated login; they are NEVER stored in op_auth.
+ * Roles: 'admin' (owner), 'cashier' (billing), 'pharmacist' (dispensing).
+ */
+const DEFAULT_STAFF = [
+  { id: 1, name: 'Suresh Saha',   email: 'admin@saha.com',  password: 'admin123', role: 'admin',       phone: '+91-98765-00001', joinDate: '2022-06-01', active: true,  avatar: 'SS' },
+  { id: 2, name: 'Raj Kumar',     email: 'raj@saha.com',    password: 'pass123',  role: 'cashier',     phone: '+91-98765-00002', joinDate: '2023-03-15', active: true,  avatar: 'RK' },
+  { id: 3, name: 'Priya Singh',   email: 'priya@saha.com',  password: 'pass123',  role: 'cashier',     phone: '+91-98765-00003', joinDate: '2023-08-20', active: true,  avatar: 'PS' },
+  { id: 4, name: 'Dr. Amit Dev',  email: 'amit@saha.com',   password: 'pass123',  role: 'pharmacist',  phone: '+91-98765-00004', joinDate: '2023-01-10', active: false, avatar: 'AD' },
+  { id: 5, name: 'Meena Rao',     email: 'meena@saha.com',  password: 'pass123',  role: 'cashier',     phone: '+91-98765-00005', joinDate: '2024-01-05', active: true,  avatar: 'MR' },
 ];
 
 /** Monthly sales data for the last 6 months (used in Admin charts). */
@@ -113,15 +150,36 @@ const seedLocalStorage = () => {
   if (!localStorage.getItem('op_slots')) {
     localStorage.setItem('op_slots',       JSON.stringify(generateSlots()));
   }
+  if (!localStorage.getItem('op_pharmacies')) {
+    localStorage.setItem('op_pharmacies',  JSON.stringify(DEFAULT_PHARMACIES));
+  }
+  if (!localStorage.getItem('op_pharmacy_inv')) {
+    localStorage.setItem('op_pharmacy_inv',JSON.stringify(DEFAULT_PHARMACY_INVENTORIES));
+  }
+  if (!localStorage.getItem('op_staff')) {
+    localStorage.setItem('op_staff',       JSON.stringify(DEFAULT_STAFF));
+  }
 };
 
 // ── Helpers to read/write localStorage ──────────────────────────────────────
-export const getInventory    = () => JSON.parse(localStorage.getItem('op_inventory')    || '[]');
-export const saveInventory   = (d) => localStorage.setItem('op_inventory', JSON.stringify(d));
-export const getSalesData    = () => JSON.parse(localStorage.getItem('op_sales')        || '[]');
-export const getDosageSlips  = () => JSON.parse(localStorage.getItem('op_dosage_slips') || '[]');
-export const getSlots        = () => JSON.parse(localStorage.getItem('op_slots')        || '[]');
-export const saveSlots       = (d) => localStorage.setItem('op_slots', JSON.stringify(d));
+export const getInventory       = () => JSON.parse(localStorage.getItem('op_inventory')    || '[]');
+export const saveInventory      = (d) => localStorage.setItem('op_inventory', JSON.stringify(d));
+export const getSalesData       = () => JSON.parse(localStorage.getItem('op_sales')        || '[]');
+export const getDosageSlips     = () => JSON.parse(localStorage.getItem('op_dosage_slips') || '[]');
+export const getSlots           = () => JSON.parse(localStorage.getItem('op_slots')        || '[]');
+export const saveSlots          = (d) => localStorage.setItem('op_slots', JSON.stringify(d));
+export const getPharmacies      = () => JSON.parse(localStorage.getItem('op_pharmacies')   || '[]');
+export const getPharmacyInv     = () => JSON.parse(localStorage.getItem('op_pharmacy_inv') || '{}');
+export const getStaff           = () => JSON.parse(localStorage.getItem('op_staff')        || '[]');
+export const saveStaff          = (d) => localStorage.setItem('op_staff', JSON.stringify(d));
+
+/** Auth helpers – password is never written to op_auth. */
+export const getAuth  = () => JSON.parse(localStorage.getItem('op_auth')  || 'null');
+export const saveAuth = (user) => {
+  const safe = { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar };
+  localStorage.setItem('op_auth', JSON.stringify(safe));
+};
+export const clearAuth = () => localStorage.removeItem('op_auth');
 
 // ============================================================
 // ROOT COMPONENT
@@ -130,26 +188,77 @@ export const saveSlots       = (d) => localStorage.setItem('op_slots', JSON.stri
 const App = {
   name: 'App',
 
-  components: { Navbar, AdminDashboard, StaffPos, PatientHome },
+  components: { Navbar, AdminDashboard, StaffPos, PatientHome, LoginPage },
 
   setup() {
-    /** The currently active portal. Controls which view is rendered. */
+    /** The currently active portal view name. */
     const currentView = ref('PatientHome');
 
-    /** Mapping used by the Navbar for labels / icons. */
+    /** The currently authenticated user (null = guest / patient browsing). */
+    const currentUser = ref(getAuth());
+
+    /**
+     * When a guest tries to open a protected portal, we remember where they
+     * wanted to go so we can redirect after a successful login.
+     */
+    const pendingView = ref(null);
+
+    /** Nav tabs shown across all portals. */
     const views = [
-      { id: 'PatientHome',    label: 'Patient',  icon: 'user'    },
-      { id: 'StaffPos',       label: 'Staff',    icon: 'briefcase' },
-      { id: 'AdminDashboard', label: 'Admin',    icon: 'chart-bar'},
+      { id: 'PatientHome',    label: 'Patient', protected: false },
+      { id: 'StaffPos',       label: 'Staff',   protected: true  },
+      { id: 'AdminDashboard', label: 'Admin',   protected: true  },
     ];
 
-    const switchView = (id) => { currentView.value = id; };
+    /**
+     * Route to a portal view with auth guard.
+     * • PatientHome is always accessible.
+     * • StaffPos / AdminDashboard require a valid session.
+     * • AdminDashboard is further restricted to the 'admin' role.
+     */
+    const switchView = (id) => {
+      const protected_ = ['StaffPos', 'AdminDashboard'];
+      if (protected_.includes(id) && !currentUser.value) {
+        pendingView.value = id;
+        currentView.value = 'LoginPage';
+        return;
+      }
+      if (id === 'AdminDashboard' && currentUser.value && currentUser.value.role !== 'admin') {
+        // Non-admin staff should not reach the admin panel
+        return;
+      }
+      currentView.value = id;
+    };
 
-    // Provide shared state to all descendant components
-    provide('currentView', currentView);
-    provide('switchView',  switchView);
+    /**
+     * Called by LoginPage after credentials are validated.
+     * Stores the safe (password-free) user object and navigates to the
+     * intended portal (or the role's default portal if no pending view).
+     */
+    const handleLogin = (user) => {
+      saveAuth(user);
+      currentUser.value = { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar };
+      const target = pendingView.value || (user.role === 'admin' ? 'AdminDashboard' : 'StaffPos');
+      pendingView.value = null;
+      // Use switchView so role checks are applied even on manual calls
+      currentView.value = target;
+    };
 
-    return { currentView, views, switchView };
+    /** Called from Navbar logout button or from any child component. */
+    const handleLogout = () => {
+      clearAuth();
+      currentUser.value = null;
+      currentView.value = 'PatientHome';
+    };
+
+    // ── Provide shared state & actions to all descendants ────────────────
+    provide('currentView',  currentView);
+    provide('currentUser',  currentUser);
+    provide('switchView',   switchView);
+    provide('handleLogin',  handleLogin);
+    provide('handleLogout', handleLogout);
+
+    return { currentView, currentUser, views, switchView, handleLogout };
   },
 
   template: `
@@ -158,7 +267,9 @@ const App = {
       <Navbar
         :views="views"
         :current="currentView"
+        :user="currentUser"
         @switch="switchView"
+        @logout="handleLogout"
       />
 
       <!-- Dynamic portal rendering -->
