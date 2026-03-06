@@ -64,3 +64,7 @@ canvas { display: block; max-width: 100%; }
 @media print {
   #app > nav, .no-print { display: none !important; }
 }
+
+/* ── Hide scrollbar utility (used by PatientHome sub-navs) ── */
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

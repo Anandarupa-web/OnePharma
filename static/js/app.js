@@ -78,6 +78,16 @@ const DEFAULT_STAFF = [
   { id: 5, name: 'Meena Rao',     email: 'meena@saha.com',  password: 'pass123',  role: 'cashier',     phone: '+91-98765-00005', joinDate: '2024-01-05', active: true,  avatar: 'MR' },
 ];
 
+/**
+ * Demo patient accounts.
+ * Phone + password login; passwords are plain-text for Phase 1 simulation only.
+ * Phase 2 will use bcrypt server-side + JWT.
+ */
+const DEFAULT_PATIENTS = [
+  { id: 101, name: 'Arjun Sharma',  phone: '+91-90001-11111', phoneVerified: true,  password: 'demo123', createdAt: '2026-01-15' },
+  { id: 102, name: 'Priya Das',     phone: '+91-90002-22222', phoneVerified: false, password: 'demo123', createdAt: '2026-02-20' },
+];
+
 /** Monthly sales data for the last 6 months (used in Admin charts). */
 const DEFAULT_SALES = [
   { month: 'Oct', revenue: 48200 },
@@ -159,6 +169,15 @@ const seedLocalStorage = () => {
   if (!localStorage.getItem('op_staff')) {
     localStorage.setItem('op_staff',       JSON.stringify(DEFAULT_STAFF));
   }
+  if (!localStorage.getItem('op_patients')) {
+    localStorage.setItem('op_patients',    JSON.stringify(DEFAULT_PATIENTS));
+  }
+  if (!localStorage.getItem('op_carts')) {
+    localStorage.setItem('op_carts',       JSON.stringify([]));
+  }
+  if (!localStorage.getItem('op_orders')) {
+    localStorage.setItem('op_orders',      JSON.stringify([]));
+  }
 };
 
 // ── Helpers to read/write localStorage ──────────────────────────────────────
@@ -172,6 +191,26 @@ export const getPharmacies      = () => JSON.parse(localStorage.getItem('op_phar
 export const getPharmacyInv     = () => JSON.parse(localStorage.getItem('op_pharmacy_inv') || '{}');
 export const getStaff           = () => JSON.parse(localStorage.getItem('op_staff')        || '[]');
 export const saveStaff          = (d) => localStorage.setItem('op_staff', JSON.stringify(d));
+
+/** Patient account helpers. */
+export const getPatients        = () => JSON.parse(localStorage.getItem('op_patients')     || '[]');
+export const savePatients       = (d) => localStorage.setItem('op_patients', JSON.stringify(d));
+
+/** Patient cart helpers. Cart shape: { id, patientId, pharmacyId, pharmacyName, items: [{medId, medName, price, qty}], createdAt } */
+export const getCarts           = () => JSON.parse(localStorage.getItem('op_carts')        || '[]');
+export const saveCarts          = (d) => localStorage.setItem('op_carts', JSON.stringify(d));
+
+/** Patient order helpers. Order shape: { id, cartId, patientId, patientName, patientPhone, pharmacyId, pharmacyName, items, status, createdAt } */
+export const getOrders          = () => JSON.parse(localStorage.getItem('op_orders')       || '[]');
+export const saveOrders         = (d) => localStorage.setItem('op_orders', JSON.stringify(d));
+
+/** Patient session – stored separately from staff auth (op_auth). Password never written here. */
+export const getPatientAuth     = () => JSON.parse(localStorage.getItem('op_patient_auth') || 'null');
+export const savePatientAuth    = (p) => {
+  const safe = { id: p.id, name: p.name, phone: p.phone, phoneVerified: p.phoneVerified || false };
+  localStorage.setItem('op_patient_auth', JSON.stringify(safe));
+};
+export const clearPatientAuth   = () => localStorage.removeItem('op_patient_auth');
 
 /** Auth helpers – password is never written to op_auth. */
 export const getAuth  = () => JSON.parse(localStorage.getItem('op_auth')  || 'null');
