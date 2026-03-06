@@ -50,6 +50,11 @@ export default defineComponent({
         loading.value = false;
 
         const staff = getStaff();
+        // NOTE: Plain-text password comparison is intentional for this Phase 1
+        // client-side simulation.  In Phase 2 this will be replaced by a secure
+        // POST /api/auth/login endpoint that compares bcrypt-hashed passwords
+        // server-side and returns a signed JWT – passwords will never travel in
+        // plain text or be stored unhashed.
         const user  = staff.find(
           (s) => s.email === email.value.trim().toLowerCase() &&
                  s.password === password.value &&

@@ -12,6 +12,7 @@
  *   logout      – logout button clicked
  */
 import { defineComponent, computed } from 'vue';
+import { roleBadgeClass } from '../app.js';
 
 export default defineComponent({
   name: 'Navbar',
@@ -25,12 +26,7 @@ export default defineComponent({
   emits: ['switch', 'logout'],
 
   setup(props) {
-    /** Role badge colour map. */
-    const roleBadge = computed(() => {
-      if (!props.user) return '';
-      const map = { admin: 'bg-purple-100 text-purple-700', cashier: 'bg-blue-100 text-blue-700', pharmacist: 'bg-teal-100 text-teal-700' };
-      return map[props.user.role] || 'bg-gray-100 text-gray-700';
-    });
+    const roleBadge = computed(() => props.user ? roleBadgeClass(props.user.role) : '');
     return { roleBadge };
   },
 

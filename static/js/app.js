@@ -181,6 +181,16 @@ export const saveAuth = (user) => {
 };
 export const clearAuth = () => localStorage.removeItem('op_auth');
 
+/**
+ * Shared role → Tailwind badge class map.
+ * Exported so Navbar, AdminDashboard, and any future component
+ * can use the same colour scheme without duplication.
+ */
+export const roleBadgeClass = (role) => {
+  const map = { admin: 'bg-purple-100 text-purple-700', cashier: 'bg-blue-100 text-blue-700', pharmacist: 'bg-teal-100 text-teal-700' };
+  return map[role] || 'bg-gray-100 text-gray-700';
+};
+
 // ============================================================
 // ROOT COMPONENT
 // ============================================================
@@ -217,8 +227,8 @@ const App = {
      * • AdminDashboard is further restricted to the 'admin' role.
      */
     const switchView = (id) => {
-      const protected_ = ['StaffPos', 'AdminDashboard'];
-      if (protected_.includes(id) && !currentUser.value) {
+      const viewDef = views.find((v) => v.id === id);
+      if (viewDef && viewDef.protected && !currentUser.value) {
         pendingView.value = id;
         currentView.value = 'LoginPage';
         return;
@@ -240,8 +250,8 @@ const App = {
       currentUser.value = { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar };
       const target = pendingView.value || (user.role === 'admin' ? 'AdminDashboard' : 'StaffPos');
       pendingView.value = null;
-      // Use switchView so role checks are applied even on manual calls
-      currentView.value = target;
+      // Call switchView so role-checks and guard logic are always applied consistently
+      switchView(target);
     };
 
     /** Called from Navbar logout button or from any child component. */

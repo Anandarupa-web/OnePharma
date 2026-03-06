@@ -130,7 +130,8 @@ export default defineComponent({
     const onDateChange = () => { bookedSlotMsg.value = ''; };
 
     // ── Star rating helper ─────────────────────────────────────────────────
-    const stars = (rating) => '★'.repeat(Math.round(rating)) + '☆'.repeat(5 - Math.round(rating));
+    const MAX_STARS = 5;
+    const stars = (rating) => '★'.repeat(Math.round(rating)) + '☆'.repeat(MAX_STARS - Math.round(rating));
 
     return {
       activeTab, tabs, handleTabClick,

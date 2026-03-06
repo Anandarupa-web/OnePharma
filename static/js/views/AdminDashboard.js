@@ -11,7 +11,7 @@
  */
 import { defineComponent, ref, computed, onMounted, watch, nextTick, reactive } from 'vue';
 import StockAlertCard from '../components/StockAlertCard.js';
-import { getInventory, getSalesData, getStaff, saveStaff } from '../app.js';
+import { getInventory, getSalesData, getStaff, saveStaff, roleBadgeClass } from '../app.js';
 
 export default defineComponent({
   name: 'AdminDashboard',
@@ -47,16 +47,15 @@ export default defineComponent({
     const staffList    = ref(getStaff());
     const showAddStaff = ref(false);
     const editingStaff = ref(null);   // null = new, object = editing existing
+    const confirmRemoveId = ref(null); // non-null triggers the confirm modal
 
     const blankForm = () => ({ name: '', email: '', password: '', role: 'cashier', phone: '', active: true });
     const staffForm = reactive(blankForm());
 
     const ROLES = ['admin', 'cashier', 'pharmacist'];
 
-    const roleBadge = (role) => {
-      const map = { admin: 'bg-purple-100 text-purple-700', cashier: 'bg-blue-100 text-blue-700', pharmacist: 'bg-teal-100 text-teal-700' };
-      return map[role] || 'bg-gray-100 text-gray-700';
-    };
+    // Delegate to the shared utility exported from app.js
+    const roleBadge = roleBadgeClass;
 
     /** Open the Add Staff form (blank). */
     const openAddForm = () => {
@@ -79,7 +78,7 @@ export default defineComponent({
       if (editingStaff.value === null) {
         // Add new staff member
         const newId = Math.max(0, ...staffList.value.map((s) => s.id)) + 1;
-        const avatar = staffForm.name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+        const avatar = staffForm.name.split(' ').filter((w) => w.length > 0).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '??';
         staffList.value.push({ ...staffForm, id: newId, avatar, joinDate: new Date().toISOString().split('T')[0] });
       } else {
         // Update existing
@@ -97,11 +96,13 @@ export default defineComponent({
       saveStaff(staffList.value);
     };
 
-    /** Remove a staff member (with confirmation). */
-    const removeMember = (id) => {
-      if (!confirm('Remove this staff member? This cannot be undone.')) return;
-      staffList.value = staffList.value.filter((s) => s.id !== id);
+    /** Show a custom confirmation modal before removing a staff member. */
+    const removeMember = (id) => { confirmRemoveId.value = id; };
+
+    const confirmRemove = () => {
+      staffList.value = staffList.value.filter((s) => s.id !== confirmRemoveId.value);
       saveStaff(staffList.value);
+      confirmRemoveId.value = null;
     };
 
     // ── Derived alert lists ────────────────────────────────────────────────
@@ -221,6 +222,7 @@ export default defineComponent({
       // Staff management
       staffList, showAddStaff, staffForm, editingStaff, ROLES,
       roleBadge, openAddForm, openEditForm, saveStaffMember, toggleActive, removeMember,
+      confirmRemoveId, confirmRemove,
     };
   },
 
@@ -727,6 +729,31 @@ export default defineComponent({
                   >
                     {{ editingStaff === null ? 'Add Staff' : 'Save Changes' }}
                   </button>
+                </div>
+              </div>
+            </div>
+          </Transition>
+
+          <!-- Remove-staff confirmation modal -->
+          <Transition name="fade">
+            <div
+              v-if="confirmRemoveId !== null"
+              class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+              @click.self="confirmRemoveId = null"
+            >
+              <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+                <div class="text-5xl mb-3">⚠️</div>
+                <h2 class="text-lg font-bold text-gray-900 mb-1">Remove Staff Member?</h2>
+                <p class="text-sm text-gray-500 mb-5">This action cannot be undone.</p>
+                <div class="flex gap-3">
+                  <button
+                    @click="confirmRemoveId = null"
+                    class="flex-1 py-2.5 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition"
+                  >Cancel</button>
+                  <button
+                    @click="confirmRemove"
+                    class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition"
+                  >Remove</button>
                 </div>
               </div>
             </div>
