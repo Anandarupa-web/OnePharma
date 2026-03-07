@@ -73,7 +73,7 @@ export default defineComponent({
       if (catFilter.value) list = list.filter(m => m.category === catFilter.value);
       if (q.length >= 2) list = list.filter(m =>
         m.name?.toLowerCase().includes(q) || m.brand?.toLowerCase().includes(q) || m.generic?.toLowerCase().includes(q));
-      if (!q && !catFilter.value) return [];
+      if (q.length < 2 && !catFilter.value) return [];
       return list.slice(0, 8);
     });
 

@@ -116,7 +116,7 @@ export default defineComponent({
       submitLoading.value = true;
 
       setTimeout(() => {
-        const orderId = 'RX-' + Date.now().toString().slice(-6);
+        const orderId = 'RX-' + Date.now().toString().slice(-8) + '-' + Math.floor(Math.random() * 1000).toString().padStart(3, '0');
         const order = {
           id: orderId,
           doctorId:   myDoctor.value?.id,
