@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OnePharma – Saha Pharmacy</title>
+
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Chart.js via CDN for Admin analytics -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <!-- QRCode.js for patient order QR codes -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+
+  <!-- Custom Tailwind configuration -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50:  '#f0fdf4',
+              100: '#dcfce7',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+              800: '#166534',
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Custom global styles -->
+  <link rel="stylesheet" href="./static/css/styles.css" />
+</head>
+<body class="bg-gray-50 text-gray-900 antialiased">
+
+  <!-- Vue 3 mount point -->
+  <div id="app"></div>
+
+  <!-- Vue 3 via ESM CDN – must come before app.js -->
+  <script type="importmap">
+  {
+    "imports": {
+      "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js"
+    }
+  }
+  </script>
+
+  <!-- Bootstrap the application -->
+  <script type="module" src="./static/js/app.js"></script>
+</body>
+</html>
