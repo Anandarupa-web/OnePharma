@@ -51,3 +51,14 @@ Currently, the project is in **Phase 1**, focusing on a high-fidelity, interacti
 ## 📅 Roadmap
 * **[span_30](start_span)[span_31](start_span)Milestone 1 (March 22):** Finalize requirement specifications, UI/UX prototyping, and core user flow validation[span_30](end_span)[span_31](end_span).
 * **[span_32](start_span)Phase 2:** Backend integration, database architecture, and integration of Tertiary Users (Registered Doctors)[span_32](end_span).
+
+## 📖 Developer Documentation
+
+For complete technical documentation aimed at backend integration:
+
+| Document | Contents |
+|----------|----------|
+| [`README.md`](README.md) | Full feature list by role, demo credentials, project structure |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Vue architecture, file roles, provide/inject map, data layer exports |
+| [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) | All localStorage schemas with field-by-field documentation |
+| [`docs/FLASK_INTEGRATION.md`](docs/FLASK_INTEGRATION.md) | Flask REST endpoint mapping, auth migration, CORS, Phase 2 checklist |
