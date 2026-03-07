@@ -322,7 +322,8 @@ export const clearPatientAuth   = () => localStorage.removeItem('op_patient_auth
 /** Auth helpers – password is never written to op_auth. */
 export const getAuth  = () => JSON.parse(localStorage.getItem('op_auth')  || 'null');
 export const saveAuth = (user) => {
-  const safe = { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar, doctorId: user.doctorId || null };
+  const safe = { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar };
+  if (user.role === 'doctor') safe.doctorId = user.doctorId || null;
   localStorage.setItem('op_auth', JSON.stringify(safe));
 };
 export const clearAuth = () => localStorage.removeItem('op_auth');

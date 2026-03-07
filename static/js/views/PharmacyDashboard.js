@@ -11,7 +11,7 @@
  *  5. Alerts     – Low-stock & near-expiry cards
  *  6. Suppliers  – Date-range report with PDF / CSV export simulation
  */
-import { defineComponent, ref, computed, reactive, onMounted } from 'vue';
+import { defineComponent, ref, computed, reactive, onMounted, inject } from 'vue';
 import StockAlertCard from '../components/StockAlertCard.js';
 import {
   getInventory, saveInventory, getSalesData,
@@ -32,6 +32,10 @@ export default defineComponent({
     const STOCK_WARNING_RATIO = 1.2;
     /** Estimated purchase price ≈ PURCHASE_COST_RATIO × selling price. */
     const PURCHASE_COST_RATIO = 0.7;
+
+    // ── Get current pharmacist's pharmacy ID from auth ─────────────────────
+    const currentUser = inject('currentUser');
+    const myPharmacyId = computed(() => currentUser.value?.pharmacyId ?? 1);
 
     // ── Core reactive data ─────────────────────────────────────────────────
     const activePanel = ref('overview');
@@ -112,7 +116,7 @@ export default defineComponent({
     const pharmacyAppointments = computed(() => {
       const today = new Date().toISOString().split('T')[0];
       return appointments.value
-        .filter(a => a.pharmacyId === 1 && (a.date === today || a.status === 'scheduled'))
+        .filter(a => a.pharmacyId === myPharmacyId.value && (a.date === today || a.status === 'scheduled'))
         .sort((a, b) => a.time.localeCompare(b.time));
     });
 

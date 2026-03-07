@@ -472,6 +472,112 @@ export default defineComponent({
     };
     const onDateChange = () => { bookedSlotMsg.value = ''; };
 
+    // ── Appointment booking (doctor search via symptoms) ─────────────────────
+    const SYMPTOM_MAP = {
+      'fever':    ['Fever & flu', 'Body ache', 'High temperature'],
+      'cold':     ['Cold & cough', 'Runny nose', 'Sore throat'],
+      'cough':    ['Cold & cough', 'Sore throat', 'Breathing difficulty'],
+      'pain':     ['Back pain', 'Joint pain', 'Headache'],
+      'diabetes': ['Blood sugar control', 'Diabetes follow-up', 'Insulin management'],
+      'bp':       ['High BP check', 'Blood pressure', 'Heart check'],
+      'heart':    ['High BP check', 'Heart check', 'Chest pain'],
+      'allergy':  ['Skin allergy', 'Hay fever', 'Hives'],
+      'chest':    ['Breathing difficulty', 'Asthma', 'Chest pain'],
+      'stomach':  ['Acidity', 'Stomach pain', 'Gastritis'],
+      'asthma':   ['Asthma', 'Breathing difficulty'],
+      'thyroid':  ['Thyroid follow-up', 'Blood sugar control'],
+    };
+    const SPECIALTY_MAP = {
+      'Fever & flu': 'General Physician', 'Body ache': 'General Physician', 'High temperature': 'General Physician',
+      'Cold & cough': 'General Physician', 'Runny nose': 'General Physician', 'Sore throat': 'General Physician',
+      'Back pain': 'General Physician', 'Joint pain': 'General Physician', 'Headache': 'General Physician',
+      'Blood sugar control': 'Diabetologist', 'Diabetes follow-up': 'Diabetologist', 'Insulin management': 'Diabetologist',
+      'Thyroid follow-up': 'Diabetologist',
+      'High BP check': 'Cardiologist', 'Blood pressure': 'Cardiologist', 'Heart check': 'Cardiologist', 'Chest pain': 'Cardiologist',
+      'Skin allergy': 'General Physician', 'Hay fever': 'General Physician', 'Hives': 'General Physician',
+      'Breathing difficulty': 'Pulmonologist', 'Asthma': 'Pulmonologist',
+      'Acidity': 'General Physician', 'Stomach pain': 'General Physician', 'Gastritis': 'General Physician',
+    };
+    const AVAIL_TIMES = ['09:00','09:30','10:00','10:30','11:00','11:30','14:00','14:30','15:00','15:30','16:00','16:30'];
+
+    const symptomQuery   = ref('');
+    const selectedSymptom = ref('');
+    const allDoctors     = ref(JSON.parse(localStorage.getItem('op_doctors') || '[]'));
+    const showBookingModal = ref(false);
+    const bookingDoc     = ref(null);
+    const bookingForm    = reactive({ mobile: '', patientName: '', date: '', time: '', reason: '' });
+    const bookingError   = ref('');
+    const bookingSuccess = ref('');
+    const apptMinDate    = today;
+    const apptMaxDate    = (() => { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().split('T')[0]; })();
+
+    const symptomChips = computed(() => {
+      const q = (symptomQuery.value || '').toLowerCase().trim();
+      if (q.length < 2) return [];
+      for (const [key, chips] of Object.entries(SYMPTOM_MAP)) {
+        if (key.includes(q) || q.includes(key)) return chips;
+      }
+      return ['Fever & flu', 'Cold & cough', 'Back pain', 'Diabetes follow-up', 'High BP check'];
+    });
+
+    const suggestedDoctors = computed(() => {
+      if (!selectedSymptom.value) return [];
+      const spec = SPECIALTY_MAP[selectedSymptom.value] || 'General Physician';
+      return allDoctors.value.filter(d => d.active && d.specialty === spec).slice(0, 4);
+    });
+
+    const selectSymptom = (chip) => {
+      selectedSymptom.value = chip;
+      symptomQuery.value    = chip;
+    };
+
+    const openBookingModal = (doc) => {
+      bookingDoc.value = doc;
+      Object.assign(bookingForm, { mobile: patientUser.value?.phone || '', patientName: patientUser.value?.name || '', date: '', time: '', reason: selectedSymptom.value });
+      bookingError.value   = '';
+      bookingSuccess.value = '';
+      showBookingModal.value = true;
+    };
+
+    const confirmBooking = () => {
+      bookingError.value = '';
+      if (!bookingForm.mobile || !bookingForm.patientName || !bookingForm.date || !bookingForm.time) {
+        bookingError.value = 'Please fill all required fields.'; return;
+      }
+      const apts = JSON.parse(localStorage.getItem('op_appointments') || '[]');
+      apts.push({
+        id: 'APT-' + Date.now(),
+        patientName: bookingForm.patientName,
+        patientPhone: bookingForm.mobile,
+        doctorId: bookingDoc.value.id,
+        doctorName: bookingDoc.value.name,
+        date: bookingForm.date,
+        time: bookingForm.time,
+        reason: bookingForm.reason || selectedSymptom.value || 'Consultation',
+        status: 'scheduled',
+        pharmacyId: bookingDoc.value.pharmacyId || null,
+        createdAt: new Date().toISOString(),
+      });
+      localStorage.setItem('op_appointments', JSON.stringify(apts));
+      bookingSuccess.value = `✅ Appointment booked with ${bookingDoc.value.name} on ${bookingForm.date} at ${bookingForm.time}!`;
+      setTimeout(() => { showBookingModal.value = false; bookingSuccess.value = ''; }, 3000);
+    };
+
+    // ── Order status lookup ──────────────────────────────────────────────────
+    const orderLookupPhone   = ref('');
+    const orderLookupResults = ref([]);
+    const orderLookupSearched = ref(false);
+
+    const lookupOrders = () => {
+      orderLookupSearched.value = true;
+      const phone = orderLookupPhone.value.trim();
+      if (!phone) return;
+      const allOrders = JSON.parse(localStorage.getItem('op_orders') || '[]');
+      orderLookupResults.value = allOrders.filter(o =>
+        o.patientPhone === phone || o.patientPhone?.replace(/\D/g,'').endsWith(phone.replace(/\D/g,'').slice(-10))
+      );
+    };
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     onMounted(() => {
@@ -500,6 +606,12 @@ export default defineComponent({
       meSubView, patientOrders,
       showChat, chatMessages, chatInput, chatTyping, chatListEl, sendChat,
       dosageSlips, slots, bookedSlotMsg, selectedDate, minDate, maxDate, bookSlot, onDateChange,
+      // Appointment booking
+      symptomQuery, selectedSymptom, symptomChips, suggestedDoctors, selectSymptom,
+      allDoctors, showBookingModal, bookingDoc, bookingForm, bookingError, bookingSuccess,
+      openBookingModal, confirmBooking, AVAIL_TIMES, apptMinDate, apptMaxDate,
+      // Order lookup
+      orderLookupPhone, orderLookupResults, orderLookupSearched, lookupOrders,
     };
   },
 
@@ -776,7 +888,113 @@ export default defineComponent({
             </div>
           </div>
         </div>
+
+        <!-- ── Book a Doctor Appointment ─────────────────────────────────── -->
+        <div class="px-4 mt-5 max-w-5xl mx-auto">
+          <h2 class="text-base font-bold text-gray-900 mb-3">📅 Book a Doctor Appointment</h2>
+          <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 mb-3">
+            <input v-model="symptomQuery" placeholder="Type your symptom (e.g. fever, back pain, diabetes)…"
+              class="w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-4 py-3 text-sm outline-none" />
+            <div v-if="symptomChips.length" class="flex flex-wrap gap-2 mt-3">
+              <button v-for="chip in symptomChips" :key="chip" @click="selectSymptom(chip)"
+                :class="['text-xs px-3 py-1.5 rounded-full border font-medium transition',
+                  selectedSymptom===chip ? 'bg-green-600 border-green-600 text-white' : 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100']">
+                {{ chip }}
+              </button>
+            </div>
+          </div>
+          <div v-if="suggestedDoctors.length" class="space-y-2 mb-4">
+            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Suggested Doctors</p>
+            <div v-for="doc in suggestedDoctors" :key="doc.id"
+              class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200 flex items-center justify-between gap-3">
+              <div class="flex-1 min-w-0">
+                <p class="font-semibold text-gray-900 text-sm">{{ doc.name }}</p>
+                <p class="text-xs text-gray-500 mt-0.5">{{ doc.specialty }} · {{ doc.clinic }}</p>
+                <p v-if="doc.pharmacyId" class="text-xs text-green-600 mt-0.5">🏪 Linked pharmacy – quick fulfillment</p>
+              </div>
+              <button @click="openBookingModal(doc)"
+                class="text-xs bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-xl transition shrink-0">
+                Book →
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Order Status Tracker ─────────────────────────────────────── -->
+        <div class="px-4 mt-4 pb-6 max-w-5xl mx-auto">
+          <h2 class="text-base font-bold text-gray-900 mb-3">📦 Track Your Order</h2>
+          <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
+            <div class="flex gap-2">
+              <input v-model="orderLookupPhone" placeholder="Enter your mobile number…" type="tel"
+                @keyup.enter="lookupOrders"
+                class="flex-1 border-2 border-gray-200 focus:border-green-500 rounded-xl px-4 py-2.5 text-sm outline-none" />
+              <button @click="lookupOrders"
+                class="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2.5 rounded-xl text-sm transition">Track</button>
+            </div>
+            <div v-if="orderLookupSearched && orderLookupResults.length === 0" class="mt-3 text-sm text-gray-400 text-center py-3">
+              No orders found for this number.
+            </div>
+            <div v-if="orderLookupResults.length" class="mt-3 space-y-2">
+              <div v-for="ord in orderLookupResults" :key="ord.id"
+                class="bg-gray-50 rounded-xl px-4 py-3 border border-gray-200">
+                <div class="flex items-center justify-between flex-wrap gap-2">
+                  <p class="text-sm font-semibold text-gray-800">{{ ord.id }}</p>
+                  <span :class="['text-xs font-semibold px-2 py-0.5 rounded-full',
+                    ord.status === 'completed'   ? 'bg-green-100 text-green-700' :
+                    ord.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
+                    ord.status === 'pending'     ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500']">
+                    {{ ord.status === 'in_progress' ? 'In Progress' : (ord.status || 'Unknown').replace(/_/g,' ') }}
+                  </span>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">{{ (ord.items || []).length }} item(s) · ₹{{ ord.finalTotal?.toFixed(2) || '—' }}</p>
+                <p class="text-xs text-gray-400 mt-0.5">Ordered: {{ new Date(ord.createdAt).toLocaleDateString('en-IN') }}</p>
+                <p v-if="ord.status==='completed'" class="mt-1 text-xs text-green-600 font-medium">✅ Ready for pickup at pharmacy</p>
+                <p v-if="ord.status==='in_progress'" class="mt-1 text-xs text-blue-600 font-medium">⚗️ Being prepared at pharmacy</p>
+                <p v-if="ord.status==='pending'" class="mt-1 text-xs text-amber-600 font-medium">⏳ Waiting to be processed</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
+      <Transition name="fade">
+        <div v-if="showBookingModal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" @click.self="showBookingModal=false">
+          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-lg font-bold text-gray-900">📅 Book Appointment</h2>
+              <button @click="showBookingModal=false" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+            </div>
+            <div class="bg-blue-50 rounded-xl px-4 py-3 mb-4">
+              <p class="font-semibold text-blue-800">{{ bookingDoc?.name }}</p>
+              <p class="text-xs text-blue-600">{{ bookingDoc?.specialty }} · {{ bookingDoc?.clinic }}</p>
+              <p v-if="bookingDoc?.pharmacyId" class="text-xs text-green-600 mt-0.5">🏪 Linked to pharmacy – prescription sent automatically</p>
+            </div>
+            <div class="space-y-3">
+              <input v-model="bookingForm.patientName" placeholder="Your name *"
+                class="w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-4 py-2.5 text-sm outline-none" />
+              <input v-model="bookingForm.mobile" placeholder="Mobile number *" type="tel"
+                class="w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-4 py-2.5 text-sm outline-none" />
+              <div class="grid grid-cols-2 gap-3">
+                <input v-model="bookingForm.date" type="date" :min="apptMinDate" :max="apptMaxDate"
+                  class="border-2 border-gray-200 focus:border-green-500 rounded-xl px-4 py-2.5 text-sm outline-none" />
+                <select v-model="bookingForm.time"
+                  class="border-2 border-gray-200 focus:border-green-500 rounded-xl px-4 py-2.5 text-sm outline-none">
+                  <option value="">Select time…</option>
+                  <option v-for="t in AVAIL_TIMES" :key="t" :value="t">{{ t }}</option>
+                </select>
+              </div>
+              <textarea v-model="bookingForm.reason" placeholder="Brief reason for visit" rows="2"
+                class="w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-4 py-2.5 text-sm outline-none resize-none"></textarea>
+            </div>
+            <div v-if="bookingError" class="mt-3 bg-red-50 text-red-600 text-xs rounded-xl px-3 py-2">{{ bookingError }}</div>
+            <div v-if="bookingSuccess" class="mt-3 bg-green-50 text-green-700 text-sm rounded-xl px-3 py-2 font-medium">{{ bookingSuccess }}</div>
+            <div class="flex gap-3 mt-4">
+              <button @click="showBookingModal=false" class="flex-1 py-2.5 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50">Cancel</button>
+              <button @click="confirmBooking" :disabled="!bookingForm.mobile||!bookingForm.patientName||!bookingForm.date||!bookingForm.time"
+                class="flex-1 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white font-bold rounded-xl transition">Confirm Booking</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
 
 
       <!-- ════ TAB: FIND ════ -->
