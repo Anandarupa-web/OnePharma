@@ -17,6 +17,7 @@ import PharmacyDashboard  from './views/PharmacyDashboard.js';
 import StaffPos           from './views/StaffPos.js';
 import PatientHome        from './views/PatientHome.js';
 import LoginPage          from './views/LoginPage.js';
+import DoctorDashboard    from './views/DoctorDashboard.js';
 
 // ── Shared component imports ─────────────────────────────────────────────────
 import Navbar from './components/Navbar.js';
@@ -49,10 +50,10 @@ const DEFAULT_INVENTORY = [
  * In Phase 2 this will be a Flask API call with the user's coordinates.
  */
 const DEFAULT_PHARMACIES = [
-  { id: 1, name: 'Saha Pharmacy',    address: '12, MG Road, Kolkata – 700001',              distance: '0.3 km', rating: 4.5, totalRatings: 128, open: true,  phone: '+91-98765-43210', hours: '8 AM – 10 PM' },
-  { id: 2, name: 'MedPlus',          address: '45, Park Street, Kolkata – 700016',           distance: '1.1 km', rating: 4.2, totalRatings: 214, open: true,  phone: '+91-98765-12345', hours: '9 AM – 9 PM'  },
-  { id: 3, name: 'Apollo Pharmacy',  address: '78, Rashbehari Ave, Kolkata – 700029',        distance: '2.0 km', rating: 4.7, totalRatings: 356, open: false, phone: '+91-98765-67890', hours: '8 AM – 11 PM' },
-  { id: 4, name: 'LifeCare Pharmacy',address: '3, Sector V, Salt Lake, Kolkata – 700091',   distance: '3.5 km', rating: 4.0, totalRatings: 87,  open: true,  phone: '+91-98765-11111', hours: '10 AM – 8 PM' },
+  { id: 1, name: 'Saha Pharmacy',    address: '12, MG Road, Kolkata – 700001',              distance: '0.3 km', rating: 4.5, totalRatings: 128, open: true,  phone: '+91-98765-43210', hours: '8 AM – 10 PM', lat: 22.5726, lng: 88.3639 },
+  { id: 2, name: 'MedPlus',          address: '45, Park Street, Kolkata – 700016',           distance: '1.1 km', rating: 4.2, totalRatings: 214, open: true,  phone: '+91-98765-12345', hours: '9 AM – 9 PM',  lat: 22.5535, lng: 88.3513 },
+  { id: 3, name: 'Apollo Pharmacy',  address: '78, Rashbehari Ave, Kolkata – 700029',        distance: '2.0 km', rating: 4.7, totalRatings: 356, open: false, phone: '+91-98765-67890', hours: '8 AM – 11 PM', lat: 22.5205, lng: 88.3639 },
+  { id: 4, name: 'LifeCare Pharmacy',address: '3, Sector V, Salt Lake, Kolkata – 700091',   distance: '3.5 km', rating: 4.0, totalRatings: 87,  open: true,  phone: '+91-98765-11111', hours: '10 AM – 8 PM', lat: 22.5958, lng: 88.4496 },
 ];
 
 /**
@@ -73,12 +74,15 @@ const DEFAULT_PHARMACY_INVENTORIES = {
  *   staff       → StaffPos          (pharmacy employees — POS / billing)
  */
 const DEFAULT_STAFF = [
-  { id: 0, name: 'OnePharma Admin',  email: 'admin@onepharma.com', password: 'appadmin123', role: 'app_admin',  phone: '+91-99999-00000', joinDate: '2024-01-01', active: true,  avatar: 'OP', pharmacyId: null },
-  { id: 1, name: 'Suresh Saha',      email: 'owner@saha.com',      password: 'owner123',    role: 'pharmacist', phone: '+91-98765-00001', joinDate: '2022-06-01', active: true,  avatar: 'SS', pharmacyId: 1    },
-  { id: 2, name: 'Raj Kumar',        email: 'raj@saha.com',        password: 'pass123',     role: 'staff',      phone: '+91-98765-00002', joinDate: '2023-03-15', active: true,  avatar: 'RK', pharmacyId: 1    },
-  { id: 3, name: 'Priya Singh',      email: 'priya@saha.com',      password: 'pass123',     role: 'staff',      phone: '+91-98765-00003', joinDate: '2023-08-20', active: true,  avatar: 'PS', pharmacyId: 1    },
-  { id: 4, name: 'Dr. Amit Dev',     email: 'amit@saha.com',       password: 'pass123',     role: 'staff',      phone: '+91-98765-00004', joinDate: '2023-01-10', active: false, avatar: 'AD', pharmacyId: 1    },
-  { id: 5, name: 'Meena Rao',        email: 'meena@saha.com',      password: 'pass123',     role: 'staff',      phone: '+91-98765-00005', joinDate: '2024-01-05', active: true,  avatar: 'MR', pharmacyId: 1    },
+  { id: 0,  name: 'OnePharma Admin',      email: 'admin@onepharma.com',      password: 'appadmin123', role: 'app_admin',  phone: '+91-99999-00000', joinDate: '2024-01-01', active: true,  avatar: 'OP', pharmacyId: null,  doctorId: null },
+  { id: 1,  name: 'Suresh Saha',          email: 'owner@saha.com',           password: 'owner123',    role: 'pharmacist', phone: '+91-98765-00001', joinDate: '2022-06-01', active: true,  avatar: 'SS', pharmacyId: 1,     doctorId: null },
+  { id: 2,  name: 'Raj Kumar',            email: 'raj@saha.com',             password: 'pass123',     role: 'staff',      phone: '+91-98765-00002', joinDate: '2023-03-15', active: true,  avatar: 'RK', pharmacyId: 1,     doctorId: null },
+  { id: 3,  name: 'Priya Singh',          email: 'priya@saha.com',           password: 'pass123',     role: 'staff',      phone: '+91-98765-00003', joinDate: '2023-08-20', active: true,  avatar: 'PS', pharmacyId: 1,     doctorId: null },
+  { id: 4,  name: 'Dr. Amit Dev',         email: 'amit@saha.com',            password: 'pass123',     role: 'staff',      phone: '+91-98765-00004', joinDate: '2023-01-10', active: false, avatar: 'AD', pharmacyId: 1,     doctorId: null },
+  { id: 5,  name: 'Meena Rao',            email: 'meena@saha.com',           password: 'pass123',     role: 'staff',      phone: '+91-98765-00005', joinDate: '2024-01-05', active: true,  avatar: 'MR', pharmacyId: 1,     doctorId: null },
+  { id: 10, name: 'Dr. R. Mehta',         email: 'mehta@clinic.com',         password: 'doc123',      role: 'doctor',     phone: '+91-99001-11111', joinDate: '2020-01-01', active: true,  avatar: 'RM', pharmacyId: 1,     doctorId: 1    },
+  { id: 11, name: 'Dr. A. Sen',           email: 'sen@clinic.com',           password: 'doc123',      role: 'doctor',     phone: '+91-99001-22222', joinDate: '2020-01-01', active: true,  avatar: 'AS', pharmacyId: 1,     doctorId: 2    },
+  { id: 12, name: 'Dr. P. Chatterjee',    email: 'pchatterjee@clinic.com',   password: 'doc123',      role: 'doctor',     phone: '+91-99001-33333', joinDate: '2020-01-01', active: true,  avatar: 'PC', pharmacyId: null,  doctorId: 3    },
 ];
 
 /**
@@ -87,8 +91,20 @@ const DEFAULT_STAFF = [
  * Phase 2 will use bcrypt server-side + JWT.
  */
 const DEFAULT_PATIENTS = [
-  { id: 101, name: 'Arjun Sharma',  phone: '+91-90001-11111', phoneVerified: true,  password: 'demo123', createdAt: '2026-01-15' },
-  { id: 102, name: 'Priya Das',     phone: '+91-90002-22222', phoneVerified: false, password: 'demo123', createdAt: '2026-02-20' },
+  { id: 101, name: 'Arjun Sharma',  phone: '+91-90001-11111', phoneVerified: true,  password: 'demo123', createdAt: '2026-01-15', age: 34, address: 'Salt Lake, Kolkata',    complaint: 'Fever and body ache',    tag: 'returning' },
+  { id: 102, name: 'Priya Das',     phone: '+91-90002-22222', phoneVerified: false, password: 'demo123', createdAt: '2026-02-20', age: 28, address: 'Park Street, Kolkata',   complaint: 'Diabetes follow-up',     tag: 'returning' },
+  { id: 103, name: 'Ravi Verma',    phone: '+91-90003-33333', phoneVerified: true,  password: 'demo123', createdAt: '2026-01-01', age: 52, address: 'Ballygunge, Kolkata',    complaint: 'BP and cholesterol',     tag: 'returning' },
+  { id: 104, name: 'Sunita Pal',    phone: '+91-90004-44444', phoneVerified: true,  password: 'demo123', createdAt: '2026-02-01', age: 41, address: 'New Town, Kolkata',      complaint: 'Cold and cough',         tag: 'new'       },
+  { id: 105, name: 'Amit Roy',      phone: '+91-90005-55555', phoneVerified: true,  password: 'demo123', createdAt: '2026-03-01', age: 23, address: 'Howrah, Kolkata',        complaint: 'Skin allergy',           tag: 'new'       },
+  { id: 106, name: 'Kavita Singh',  phone: '+91-90006-66666', phoneVerified: false, password: 'demo123', createdAt: '2026-01-20', age: 60, address: 'Alipore, Kolkata',       complaint: 'Asthma check-up',        tag: 'returning' },
+  { id: 107, name: 'Deepak Ghosh',  phone: '+91-90007-77777', phoneVerified: true,  password: 'demo123', createdAt: '2026-02-15', age: 38, address: 'Dum Dum, Kolkata',       complaint: 'Back pain',              tag: 'new'       },
+  { id: 108, name: 'Meena Tiwari',  phone: '+91-90008-88888', phoneVerified: true,  password: 'demo123', createdAt: '2026-02-28', age: 45, address: 'Jadavpur, Kolkata',      complaint: 'Thyroid follow-up',      tag: 'returning' },
+];
+
+const DEFAULT_APPOINTMENTS = [
+  { id: 'APT-001', patientId: 101, patientName: 'Arjun Sharma',  patientPhone: '+91-90001-11111', doctorId: 1, doctorName: 'Dr. R. Mehta', date: '2026-03-08', time: '10:00', reason: 'Fever and body ache',  status: 'scheduled', pharmacyId: 1 },
+  { id: 'APT-002', patientId: 102, patientName: 'Priya Das',     patientPhone: '+91-90002-22222', doctorId: 2, doctorName: 'Dr. A. Sen',   date: '2026-03-08', time: '11:00', reason: 'Diabetes follow-up',   status: 'scheduled', pharmacyId: 1 },
+  { id: 'APT-003', patientId: 103, patientName: 'Ravi Verma',    patientPhone: '+91-90003-33333', doctorId: 2, doctorName: 'Dr. A. Sen',   date: '2026-03-07', time: '09:30', reason: 'BP check',             status: 'completed', pharmacyId: 1 },
 ];
 
 /** Monthly sales data for the last 6 months (used in Admin charts). */
@@ -151,15 +167,15 @@ const generateSlots = () => {
 
 /** Default doctors for the master database. */
 const DEFAULT_DOCTORS = [
-  { id: 1, name: 'Dr. R. Mehta',      specialty: 'General Physician',  phone: '+91-99001-11111', clinic: 'Mehta Clinic, Park Street', active: true },
-  { id: 2, name: 'Dr. A. Sen',        specialty: 'Diabetologist',      phone: '+91-99001-22222', clinic: 'Sen Diabetes Centre, Salt Lake', active: true },
-  { id: 3, name: 'Dr. P. Chatterjee', specialty: 'Cardiologist',       phone: '+91-99001-33333', clinic: 'Heart Care Hospital, Ballygunge', active: true },
-  { id: 4, name: 'Dr. S. Roy',        specialty: 'Pulmonologist',      phone: '+91-99001-44444', clinic: 'Breath Easy Clinic, New Town', active: true },
+  { id: 1, name: 'Dr. R. Mehta',      specialty: 'General Physician',  phone: '+91-99001-11111', clinic: 'Mehta Clinic, Park Street',          active: true, pharmacyId: 1,    lat: 22.5726, lng: 88.3639, email: 'mehta@clinic.com',      password: 'doc123' },
+  { id: 2, name: 'Dr. A. Sen',        specialty: 'Diabetologist',      phone: '+91-99001-22222', clinic: 'Sen Diabetes Centre, Salt Lake',     active: true, pharmacyId: 1,    lat: 22.5810, lng: 88.3990, email: 'sen@clinic.com',         password: 'doc123' },
+  { id: 3, name: 'Dr. P. Chatterjee', specialty: 'Cardiologist',       phone: '+91-99001-33333', clinic: 'Heart Care Hospital, Ballygunge',    active: true, pharmacyId: null, lat: 22.5205, lng: 88.3639, email: 'pchatterjee@clinic.com',  password: 'doc123' },
+  { id: 4, name: 'Dr. S. Roy',        specialty: 'Pulmonologist',      phone: '+91-99001-44444', clinic: 'Breath Easy Clinic, New Town',       active: true, pharmacyId: null, lat: 22.6169, lng: 88.4700, email: 'sroy@clinic.com',         password: 'doc123' },
 ];
 
 // ── Data version – bump this string whenever DEFAULT_STAFF changes  ──────────
 // Any returning browser with stale staff credentials will get a fresh seed.
-const DATA_VERSION = '3';
+const DATA_VERSION = '4';
 const _versionKey  = 'op_data_version';
 
 // ── Seed localStorage on first visit ────────────────────────────────────────
@@ -169,7 +185,10 @@ const seedLocalStorage = () => {
   if (localStorage.getItem(_versionKey) !== DATA_VERSION) {
     localStorage.removeItem('op_staff');
     localStorage.removeItem('op_orders');
-    localStorage.removeItem('op_auth');      // clear any stale session
+    localStorage.removeItem('op_auth');
+    localStorage.removeItem('op_doctors');
+    localStorage.removeItem('op_patients');
+    localStorage.removeItem('op_appointments');
     localStorage.setItem(_versionKey, DATA_VERSION);
   }
 
@@ -244,6 +263,9 @@ const seedLocalStorage = () => {
   if (!localStorage.getItem('op_doctors')) {
     localStorage.setItem('op_doctors',     JSON.stringify(DEFAULT_DOCTORS));
   }
+  if (!localStorage.getItem('op_appointments')) {
+    localStorage.setItem('op_appointments', JSON.stringify(DEFAULT_APPOINTMENTS));
+  }
   if (!localStorage.getItem('op_medicine_requests')) {
     localStorage.setItem('op_medicine_requests', JSON.stringify([]));
   }
@@ -281,6 +303,10 @@ export const saveDosageSlips    = (d) => localStorage.setItem('op_dosage_slips',
 export const getDoctors         = () => JSON.parse(localStorage.getItem('op_doctors')           || '[]');
 export const saveDoctors        = (d) => localStorage.setItem('op_doctors', JSON.stringify(d));
 
+/** Appointment helpers. */
+export const getAppointments    = () => JSON.parse(localStorage.getItem('op_appointments')      || '[]');
+export const saveAppointments   = (d) => localStorage.setItem('op_appointments', JSON.stringify(d));
+
 /** Medicine-request helpers – staff POS sends new medicines for admin approval. */
 export const getMedicineRequests  = () => JSON.parse(localStorage.getItem('op_medicine_requests') || '[]');
 export const saveMedicineRequests = (d) => localStorage.setItem('op_medicine_requests', JSON.stringify(d));
@@ -296,7 +322,7 @@ export const clearPatientAuth   = () => localStorage.removeItem('op_patient_auth
 /** Auth helpers – password is never written to op_auth. */
 export const getAuth  = () => JSON.parse(localStorage.getItem('op_auth')  || 'null');
 export const saveAuth = (user) => {
-  const safe = { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar };
+  const safe = { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar, doctorId: user.doctorId || null };
   localStorage.setItem('op_auth', JSON.stringify(safe));
 };
 export const clearAuth = () => localStorage.removeItem('op_auth');
@@ -311,6 +337,7 @@ export const roleBadgeClass = (role) => {
     app_admin:  'bg-purple-100 text-purple-800',
     pharmacist: 'bg-indigo-100 text-indigo-700',
     staff:      'bg-green-100  text-green-700',
+    doctor:     'bg-blue-100   text-blue-700',
   };
   return map[role] || 'bg-gray-100 text-gray-700';
 };
@@ -322,7 +349,7 @@ export const roleBadgeClass = (role) => {
 const App = {
   name: 'App',
 
-  components: { Navbar, AdminDashboard, PharmacyDashboard, StaffPos, PatientHome, LoginPage },
+  components: { Navbar, AdminDashboard, PharmacyDashboard, StaffPos, PatientHome, LoginPage, DoctorDashboard },
 
   setup() {
     /** The currently active portal view name. */
@@ -365,7 +392,7 @@ const App = {
         window.location.hash = '';
         return;
       }
-      const protected_ = { StaffPos: true, AdminDashboard: true, PharmacyDashboard: true };
+      const protected_ = { StaffPos: true, AdminDashboard: true, PharmacyDashboard: true, DoctorDashboard: true };
       if (protected_[id] && !currentUser.value) {
         pendingView.value = id;
         currentView.value = 'LoginPage';
@@ -373,6 +400,7 @@ const App = {
       }
       if (id === 'AdminDashboard' && currentUser.value && currentUser.value.role !== 'app_admin') return;
       if (id === 'PharmacyDashboard' && currentUser.value && !['app_admin','pharmacist'].includes(currentUser.value.role)) return;
+      if (id === 'DoctorDashboard' && currentUser.value && currentUser.value.role !== 'doctor') return;
       currentView.value = id;
     };
 
@@ -380,7 +408,7 @@ const App = {
     const handleLogin = (user) => {
       saveAuth(user);
       currentUser.value = { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar };
-      const roleRoutes = { app_admin: 'AdminDashboard', pharmacist: 'PharmacyDashboard', staff: 'StaffPos' };
+      const roleRoutes = { app_admin: 'AdminDashboard', pharmacist: 'PharmacyDashboard', staff: 'StaffPos', doctor: 'DoctorDashboard' };
       const target = pendingView.value || roleRoutes[user.role] || 'StaffPos';
       pendingView.value = null;
       switchView(target);
@@ -397,9 +425,11 @@ const App = {
     // ── Hash-based URL routing ─────────────────────────────────────────
     const handleHashChange = () => {
       const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
-      if (hash === 'staff')      switchView('StaffPos');
-      else if (hash === 'admin') switchView('AdminDashboard');
-      else if (!hash)            currentView.value = 'PatientHome';
+      if (hash === 'staff')           switchView('StaffPos');
+      else if (hash === 'admin')      switchView('AdminDashboard');
+      else if (hash === 'pharmacy')   switchView('PharmacyDashboard');
+      else if (hash === 'doctor')     switchView('DoctorDashboard');
+      else if (!hash)                 currentView.value = 'PatientHome';
     };
     onMounted(() => {
       handleHashChange();
@@ -491,6 +521,12 @@ const App = {
                   <a href="#admin" class="hover:text-white transition flex items-center gap-2">
                     <span class="bg-purple-800 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">Admin</span>
                     OnePharma App Admin
+                  </a>
+                </li>
+                <li>
+                  <a href="#doctor" class="hover:text-white transition flex items-center gap-2">
+                    <span class="bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">Doctor</span>
+                    Doctor Login
                   </a>
                 </li>
                 <li class="text-xs text-gray-500 pt-1">

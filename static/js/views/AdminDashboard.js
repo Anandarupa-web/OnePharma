@@ -51,7 +51,7 @@ export default defineComponent({
     const showAddPharmacy = ref(false);
     const editingPharmacy = ref(null);
     const confirmRemovePharmacyId = ref(null);
-    const blankPharmacy = () => ({ name: '', address: '', phone: '', hours: '', rating: 4.0, open: true, distance: '' });
+    const blankPharmacy = () => ({ name: '', address: '', phone: '', hours: '', rating: 4.0, open: true, distance: '', lat: '', lng: '' });
     const pharmacyForm = reactive(blankPharmacy());
 
     const openAddPharmacy = () => { Object.assign(pharmacyForm, blankPharmacy()); editingPharmacy.value = null; showAddPharmacy.value = true; };
@@ -82,7 +82,7 @@ export default defineComponent({
     const showAddDoctor = ref(false);
     const editingDoctor = ref(null);
     const confirmRemoveDoctorId = ref(null);
-    const blankDoctor = () => ({ name: '', specialty: '', phone: '', clinic: '', active: true });
+    const blankDoctor = () => ({ name: '', specialty: '', phone: '', clinic: '', active: true, pharmacyId: null, lat: '', lng: '', email: '' });
     const doctorForm = reactive(blankDoctor());
 
     const openAddDoctor = () => { Object.assign(doctorForm, blankDoctor()); editingDoctor.value = null; showAddDoctor.value = true; };
@@ -116,6 +116,12 @@ export default defineComponent({
     };
     const pendingRequests = computed(() => medRequests.value.filter(r => r.status === 'pending').length);
 
+    const getPharmacyName = (pharmacyId) => {
+      if (!pharmacyId) return '—';
+      const ph = pharmacyList.value.find(p => p.id === pharmacyId);
+      return ph ? ph.name : '—';
+    };
+
     return {
       activePanel, navItems,
       inventory, allOrders, allStaff,
@@ -132,6 +138,7 @@ export default defineComponent({
       medRequests, pendingRequests, approveRequest, rejectRequest,
       // roleBadge helper
       roleBadge: roleBadgeClass,
+      getPharmacyName,
     };
   },
 
@@ -162,17 +169,17 @@ export default defineComponent({
         <!-- KPI snapshot in sidebar footer -->
         <div class="mt-auto pt-4 border-t border-gray-100 px-3 space-y-3">
           <div>
-            <p class="text-xs text-gray-400">6-mo Revenue</p>
+            <p class="text-xs text-gray-400">Pharmacies</p>
             <p class="text-2xl font-bold text-indigo-700 mt-1">{{ totalPharmacies }}</p>
           </div>
           <div>
-            <p class="text-xs text-gray-400">Active Alerts</p>
-            <p class="text-sm font-bold" :class="totalAlerts > 0 ? 'text-red-600' : 'text-gray-700'">
-              {{ totalAlerts }}
+            <p class="text-xs text-gray-400">Pending Orders</p>
+            <p class="text-sm font-bold" :class="totalPending > 0 ? 'text-amber-600' : 'text-gray-700'">
+              {{ totalPending }}
             </p>
           </div>
           <div>
-            <p class="text-xs text-gray-400">SKUs in Stock</p>
+            <p class="text-xs text-gray-400">SKUs in Catalogue</p>
             <p class="text-sm font-bold text-gray-700">{{ totalItems }}</p>
           </div>
         </div>
@@ -382,6 +389,14 @@ export default defineComponent({
                       <input v-model.number="pharmacyForm.rating" type="number" min="0" max="5" step="0.1"
                         class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
                   </div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <label class="block"><span class="text-xs font-medium text-gray-600">Latitude</span>
+                      <input v-model.number="pharmacyForm.lat" type="number" step="any" placeholder="22.5726"
+                        class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                    <label class="block"><span class="text-xs font-medium text-gray-600">Longitude</span>
+                      <input v-model.number="pharmacyForm.lng" type="number" step="any" placeholder="88.3639"
+                        class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                  </div>
                   <label class="flex items-center gap-2">
                     <input v-model="pharmacyForm.open" type="checkbox" class="w-4 h-4 accent-green-600" />
                     <span class="text-sm text-gray-700">Currently open</span>
@@ -441,6 +456,7 @@ export default defineComponent({
                   <th class="px-4 py-3 text-left">Specialty</th>
                   <th class="px-4 py-3 text-left">Clinic</th>
                   <th class="px-4 py-3 text-left">Phone</th>
+                  <th class="px-4 py-3 text-left">Linked Pharmacy</th>
                   <th class="px-4 py-3 text-center">Status</th>
                   <th class="px-4 py-3 text-center">Actions</th>
                 </tr>
@@ -451,6 +467,7 @@ export default defineComponent({
                   <td class="px-4 py-3 text-gray-500">{{ doc.specialty }}</td>
                   <td class="px-4 py-3 text-gray-500">{{ doc.clinic }}</td>
                   <td class="px-4 py-3 text-gray-400">{{ doc.phone }}</td>
+                  <td class="px-4 py-3 text-gray-500">{{ getPharmacyName(doc.pharmacyId) }}</td>
                   <td class="px-4 py-3 text-center">
                     <span :class="['text-xs font-semibold px-2 py-0.5 rounded-full', doc.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500']">
                       {{ doc.active ? 'Active' : 'Inactive' }}
@@ -485,6 +502,24 @@ export default defineComponent({
                   <label class="block"><span class="text-xs font-medium text-gray-600">Phone</span>
                     <input v-model="doctorForm.phone" type="tel"
                       class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                  <label class="block"><span class="text-xs font-medium text-gray-600">Email (for login)</span>
+                    <input v-model="doctorForm.email" type="email" placeholder="doctor@clinic.com"
+                      class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                  <label class="block"><span class="text-xs font-medium text-gray-600">Linked Pharmacy</span>
+                    <select v-model.number="doctorForm.pharmacyId"
+                      class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none">
+                      <option :value="null">None</option>
+                      <option v-for="ph in pharmacyList" :key="ph.id" :value="ph.id">{{ ph.name }}</option>
+                    </select>
+                  </label>
+                  <div class="grid grid-cols-2 gap-3">
+                    <label class="block"><span class="text-xs font-medium text-gray-600">Latitude</span>
+                      <input v-model.number="doctorForm.lat" type="number" step="any" placeholder="22.5726"
+                        class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                    <label class="block"><span class="text-xs font-medium text-gray-600">Longitude</span>
+                      <input v-model.number="doctorForm.lng" type="number" step="any" placeholder="88.3639"
+                        class="mt-1 block w-full border-2 border-gray-200 focus:border-green-500 rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                  </div>
                   <label class="flex items-center gap-2">
                     <input v-model="doctorForm.active" type="checkbox" class="w-4 h-4 accent-green-600" />
                     <span class="text-sm text-gray-700">Active in system</span>

@@ -17,6 +17,7 @@ import {
   getInventory, saveInventory, getSalesData,
   getStaff, saveStaff, roleBadgeClass,
   getOrders, saveOrders,
+  getAppointments,
 } from '../app.js';
 
 export default defineComponent({
@@ -41,12 +42,13 @@ export default defineComponent({
 
     // ── Navigation ─────────────────────────────────────────────────────────
     const navItems = [
-      { id: 'overview',  icon: '📊', label: 'Overview',  short: 'Home'  },
-      { id: 'orders',    icon: '📋', label: 'Orders',    short: 'Orders' },
-      { id: 'inventory', icon: '📦', label: 'Inventory', short: 'Stock'  },
-      { id: 'staff',     icon: '👥', label: 'Staff',     short: 'Staff'  },
-      { id: 'alerts',    icon: '🔔', label: 'Alerts',    short: 'Alerts' },
-      { id: 'suppliers', icon: '🚚', label: 'Suppliers', short: 'Supply' },
+      { id: 'overview',      icon: '📊', label: 'Overview',      short: 'Home'   },
+      { id: 'orders',        icon: '📋', label: 'Orders',        short: 'Orders' },
+      { id: 'appointments',  icon: '📅', label: 'Appointments',  short: 'Apts'   },
+      { id: 'inventory',     icon: '📦', label: 'Inventory',     short: 'Stock'  },
+      { id: 'staff',         icon: '👥', label: 'Staff',         short: 'Staff'  },
+      { id: 'alerts',        icon: '🔔', label: 'Alerts',        short: 'Alerts' },
+      { id: 'suppliers',     icon: '🚚', label: 'Suppliers',     short: 'Supply' },
     ];
 
     /** Maximum inventory rows rendered before the user is prompted to search. */
@@ -68,8 +70,8 @@ export default defineComponent({
     });
 
     // ── Computed order lists ───────────────────────────────────────────────
-    const pendingOrders = computed(() => orders.value.filter((o) => o.status === 'pending'));
-    const historyOrders = computed(() => orders.value.filter((o) => o.status !== 'pending'));
+    const pendingOrders = computed(() => orders.value.filter((o) => ['pending','in_progress'].includes(o.status)));
+    const historyOrders = computed(() => orders.value.filter((o) => !['pending','in_progress'].includes(o.status)));
 
     // ── Orders panel sub-tab ───────────────────────────────────────────────
     const ordersTab       = ref('pending');
@@ -78,21 +80,23 @@ export default defineComponent({
       expandedOrderId.value = expandedOrderId.value === id ? null : id;
     };
 
-    /** Fulfill: set completed + deduct inventory stock. */
-    const fulfillOrder = (order) => {
+    /** Start: set in_progress. */
+    const startOrder = (ord) => {
+      const list = getOrders().map(o => o.id === ord.id ? { ...o, status: 'in_progress', startedAt: new Date().toISOString() } : o);
+      saveOrders(list); orders.value = list;
+    };
+
+    /** Complete: set completed, deduct stock, notifiedAt for patient tracking. */
+    const completeOrder = (ord) => {
       const inv = getInventory();
-      order.items.forEach((item) => {
+      ord.items.forEach((item) => {
         const med = inv.find((m) => m.name === item.name);
         if (med) med.stock = Math.max(0, med.stock - item.qty);
       });
       saveInventory(inv);
       inventory.value = inv;
-
-      const list = getOrders().map((o) =>
-        o.id === order.id ? { ...o, status: 'completed' } : o
-      );
-      saveOrders(list);
-      orders.value = list;
+      const list = getOrders().map(o => o.id === ord.id ? { ...o, status: 'completed', completedAt: new Date().toISOString(), notifiedAt: new Date().toISOString() } : o);
+      saveOrders(list); orders.value = list;
     };
 
     const cancelOrder = (order) => {
@@ -102,6 +106,15 @@ export default defineComponent({
       saveOrders(list);
       orders.value = list;
     };
+
+    // ── Appointments ───────────────────────────────────────────────────────
+    const appointments = ref(getAppointments());
+    const pharmacyAppointments = computed(() => {
+      const today = new Date().toISOString().split('T')[0];
+      return appointments.value
+        .filter(a => a.pharmacyId === 1 && (a.date === today || a.status === 'scheduled'))
+        .sort((a, b) => a.time.localeCompare(b.time));
+    });
 
     /** Returns { text, cls } for the order expiry badge. */
     const orderExpiryBadge = (order) => {
@@ -125,10 +138,11 @@ export default defineComponent({
 
     /** Returns Tailwind classes for a status badge. */
     const statusBadgeCls = (status) => ({
-      pending:   'bg-amber-100 text-amber-700',
-      completed: 'bg-green-100 text-green-700',
-      cancelled: 'bg-gray-100  text-gray-600',
-      expired:   'bg-red-100   text-red-700',
+      pending:     'bg-amber-100 text-amber-700',
+      in_progress: 'bg-blue-100  text-blue-700',
+      completed:   'bg-green-100 text-green-700',
+      cancelled:   'bg-gray-100  text-gray-600',
+      expired:     'bg-red-100   text-red-700',
     }[status] || 'bg-gray-100 text-gray-700');
 
     /** Format ISO string as a short localised date-time. */
@@ -259,8 +273,10 @@ export default defineComponent({
       // orders
       pendingOrders, historyOrders, ordersTab,
       expandedOrderId, toggleOrderItems,
-      fulfillOrder, cancelOrder,
+      startOrder, completeOrder, cancelOrder,
       orderExpiryBadge, sourceBadge, statusBadgeCls, fmtDateTime,
+      // appointments
+      appointments, pharmacyAppointments,
       // inventory
       inventory, invSearch, filteredInventory,
       editingStockId, editingStockVal, stockCellCls,
@@ -333,7 +349,7 @@ export default defineComponent({
       </aside>
 
       <!-- Mobile bottom tab-bar -->
-      <div class="sm:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 grid grid-cols-6 no-print">
+      <div class="sm:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 grid grid-cols-7 no-print">
         <button
           v-for="item in navItems"
           :key="item.id"
@@ -517,12 +533,19 @@ export default defineComponent({
 
                 <!-- Totals + actions -->
                 <div class="flex flex-wrap items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-100">
-                  <p class="text-sm font-bold text-gray-800">Total: ₹{{ o.finalTotal ?? o.subtotal ?? 0 }}</p>
+                  <div class="flex items-center gap-3">
+                    <p class="text-sm font-bold text-gray-800">Total: ₹{{ o.finalTotal ?? o.subtotal ?? 0 }}</p>
+                    <span :class="['text-xs px-2 py-0.5 rounded-full font-semibold', statusBadgeCls(o.status)]">{{ o.status }}</span>
+                  </div>
                   <div class="flex gap-2">
-                    <button
-                      @click="fulfillOrder(o)"
+                    <button v-if="o.status === 'pending'"
+                      @click="startOrder(o)"
+                      class="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition"
+                    >▶ Start</button>
+                    <button v-if="o.status === 'in_progress'"
+                      @click="completeOrder(o)"
                       class="flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition"
-                    >✓ Fulfill</button>
+                    >✓ Complete</button>
                     <button
                       @click="cancelOrder(o)"
                       class="flex items-center gap-1.5 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold px-4 py-2 rounded-xl transition"
@@ -567,6 +590,34 @@ export default defineComponent({
                   </tr>
                 </tbody>
               </table>
+            </div>
+          </div>
+        </section>
+
+
+        <!-- ──────────────────────────────────────
+             PANEL · APPOINTMENTS
+             ────────────────────────────────────── -->
+        <section v-if="activePanel === 'appointments'">
+          <h1 class="text-2xl font-bold text-gray-900 mb-5">📅 Appointments</h1>
+          <div v-if="pharmacyAppointments.length === 0" class="bg-white rounded-2xl border border-gray-200 px-6 py-12 text-center text-gray-400">
+            <div class="text-5xl mb-3">📅</div>
+            <p class="text-sm">No appointments scheduled for today.</p>
+          </div>
+          <div v-else class="space-y-3">
+            <div v-for="apt in pharmacyAppointments" :key="apt.id"
+              class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 flex flex-wrap items-start gap-4">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap mb-1">
+                  <p class="font-semibold text-gray-900">{{ apt.patientName }}</p>
+                  <span :class="['text-xs px-2 py-0.5 rounded-full font-semibold', apt.status === 'scheduled' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700']">
+                    {{ apt.status }}
+                  </span>
+                </div>
+                <p class="text-xs text-gray-500">{{ apt.patientPhone }}</p>
+                <p class="text-xs text-blue-600 mt-0.5">{{ apt.reason }}</p>
+                <p class="text-xs text-gray-400 mt-0.5">🩺 {{ apt.doctorName }} · ⏰ {{ apt.time }} · 📅 {{ apt.date }}</p>
+              </div>
             </div>
           </div>
         </section>

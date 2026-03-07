@@ -119,6 +119,8 @@ export default defineComponent({
           >
             <span class="text-2xl leading-none">💊</span>
             <span class="font-extrabold text-green-700 tracking-tight text-base sm:text-lg leading-none">OnePharma</span>
+            <span v-if="staffUser && ['pharmacist','staff'].includes(staffUser.role)" class="hidden sm:inline text-sm text-gray-500 font-normal ml-1">– Saha Pharmacy</span>
+            <span v-if="staffUser && staffUser.role === 'doctor'" class="hidden sm:inline text-sm text-gray-500 font-normal ml-1">– {{ staffUser.name }}</span>
           </button>
 
           <!-- ── City / Location selector ── -->
@@ -239,7 +241,7 @@ export default defineComponent({
               <div class="hidden sm:block text-left">
                 <p class="text-xs font-semibold text-gray-800 leading-tight">{{ staffUser.name }}</p>
                 <span :class="['text-[10px] px-1.5 py-0.5 rounded font-medium', roleBadge]">
-                  {{ staffUser.role === 'app_admin' ? 'App Admin' : staffUser.role === 'pharmacist' ? 'Pharmacy Owner' : 'Staff' }}
+                  {{ staffUser.role === 'app_admin' ? 'App Admin' : staffUser.role === 'pharmacist' ? 'Pharmacy Owner' : staffUser.role === 'doctor' ? 'Doctor' : 'Staff' }}
                 </span>
               </div>
               <button

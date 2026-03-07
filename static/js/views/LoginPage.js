@@ -32,6 +32,7 @@ export default defineComponent({
       { role: 'App Admin',       email: 'admin@onepharma.com', password: 'appadmin123', badge: 'bg-purple-100 text-purple-700', hint: '→ OnePharma Admin Dashboard' },
       { role: 'Pharmacy Owner',  email: 'owner@saha.com',      password: 'owner123',    badge: 'bg-indigo-100 text-indigo-700', hint: '→ Saha Pharmacy Dashboard'    },
       { role: 'Staff',           email: 'raj@saha.com',        password: 'pass123',     badge: 'bg-green-100 text-green-700',  hint: '→ Staff POS'                  },
+      { role: 'Doctor',          email: 'mehta@clinic.com',    password: 'doc123',      badge: 'bg-blue-100 text-blue-700',    hint: '→ Doctor Dashboard'           },
     ];
 
     /** Fill form with a demo credential on click. */
@@ -92,7 +93,7 @@ export default defineComponent({
               <span class="text-4xl">💊</span>
               <div>
                 <h1 class="text-xl font-bold">OnePharma Portal Login</h1>
-                <p class="text-green-100 text-sm">App Admin · Pharmacy Owner · Staff</p>
+                <p class="text-green-100 text-sm">App Admin · Pharmacy Owner · Staff · Doctor</p>
               </div>
             </div>
           </div>

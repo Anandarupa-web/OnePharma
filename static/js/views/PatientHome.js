@@ -729,7 +729,7 @@ export default defineComponent({
 
         <!-- Login nudge (guest only) -->
         <div v-if="!patientUser"
-          class="mx-4 mt-4 bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 flex items-center gap-3 cursor-pointer"
+          class="md:hidden mx-4 mt-4 bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 flex items-center gap-3 cursor-pointer"
           @click="openAuthModal('login')">
           <span class="text-blue-500 text-2xl">👤</span>
           <div class="flex-1">

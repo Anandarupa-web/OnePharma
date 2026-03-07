@@ -66,24 +66,46 @@ export default defineComponent({
 
     // ── Medicine search ──────────────────────────────────────────────────────
     const medQuery = ref('');
+    const catFilter = ref('');
     const medResults = computed(() => {
-      if (medQuery.value.length < 2) return [];
       const q = medQuery.value.toLowerCase();
-      return inventory.value
-        .filter(m => m.name?.toLowerCase().includes(q) ||
-                     m.brand?.toLowerCase().includes(q) ||
-                     m.generic?.toLowerCase().includes(q))
-        .slice(0, 8);
+      let list = inventory.value;
+      if (catFilter.value) list = list.filter(m => m.category === catFilter.value);
+      if (q.length >= 2) list = list.filter(m =>
+        m.name?.toLowerCase().includes(q) || m.brand?.toLowerCase().includes(q) || m.generic?.toLowerCase().includes(q));
+      if (!q && !catFilter.value) return [];
+      return list.slice(0, 8);
     });
 
-    // ── Cart ─────────────────────────────────────────────────────────────────
-    const cart = ref([]);
+    const popularMeds = computed(() =>
+      [...inventory.value].sort((a, b) => (b.unitsSold || 0) - (a.unitsSold || 0)).slice(0, 6)
+    );
+    const medCategories = computed(() => [...new Set(inventory.value.map(m => m.category).filter(Boolean))]);
+
+    // ── Multiple Carts ────────────────────────────────────────────────────────
+    const MAX_CARTS = 10;
+    const carts = ref([[]]);
+    const activeCartIdx = ref(0);
+    const cart = computed(() => carts.value[activeCartIdx.value]);
+
+    const addCart = () => {
+      if (carts.value.length >= MAX_CARTS) return;
+      carts.value.push([]);
+      activeCartIdx.value = carts.value.length - 1;
+      clearPatient();
+    };
+    const removeCart = (idx) => {
+      if (carts.value.length <= 1) return;
+      carts.value.splice(idx, 1);
+      activeCartIdx.value = Math.min(activeCartIdx.value, carts.value.length - 1);
+    };
 
     function addToCart(med) {
       if (med.stock <= 0) return;
-      const ex = cart.value.find(i => i.medId === med.id);
+      const activeCart = carts.value[activeCartIdx.value];
+      const ex = activeCart.find(i => i.medId === med.id);
       if (ex) { if (ex.qty < med.stock) ex.qty++; return; }
-      cart.value.push({
+      activeCart.push({
         id: Date.now() + Math.random(), medId: med.id,
         name: med.name, price: med.price, gst: med.gst || 0,
         stock: med.stock, qty: 1, showDosage: false,
@@ -92,7 +114,7 @@ export default defineComponent({
       medQuery.value = '';
       checkAlts(med);
     }
-    function removeItem(id) { cart.value = cart.value.filter(i => i.id !== id); alternatives.value = []; }
+    function removeItem(id) { carts.value[activeCartIdx.value] = carts.value[activeCartIdx.value].filter(i => i.id !== id); alternatives.value = []; }
     function setQty(item, d) { item.qty = Math.max(1, Math.min(item.stock, item.qty + d)); }
 
     // ── Generic alternatives ─────────────────────────────────────────────────
@@ -240,7 +262,7 @@ export default defineComponent({
     }
 
     function newTransaction() {
-      cart.value = []; alternatives.value = []; selectedPatient.value = null;
+      carts.value[activeCartIdx.value] = []; alternatives.value = []; selectedPatient.value = null;
       newPatName.value = ''; newPatPhone.value = ''; doctorName.value = ''; rxNotes.value = '';
       discountType.value = 'percentage'; discountPct.value = 0; flatFinal.value = 0;
       adjustGst.value = false; showCheckout.value = false; checkoutDone.value = false;
@@ -261,8 +283,8 @@ export default defineComponent({
       patientQuery, showPatientDrop, selectedPatient, newPatName, newPatPhone,
       patientResults, selectPatient, clearPatient, onPatBlur, cancelPatBlur, patientInitials,
       doctorName, rxNotes,
-      medQuery, medResults, addToCart,
-      cart, removeItem, setQty,
+      medQuery, medResults, catFilter, popularMeds, medCategories, addToCart,
+      carts, activeCartIdx, cart, MAX_CARTS, addCart, removeCart, removeItem, setQty,
       alternatives, substituteItem,
       discountType, discountPct, flatFinal, adjustGst, setRoundOff, DISCOUNT_TYPES,
       subtotal, rawGst, gstAmount, grossTotal, discountAmount, finalTotal, discountPctDisplay,
@@ -274,23 +296,6 @@ export default defineComponent({
 
   template: `
 <div class="min-h-screen bg-gray-50 pb-24 md:pb-4">
-
-  <!-- ── Top bar ─────────────────────────────────────────────────────────── -->
-  <div class="bg-white border-b px-4 py-3 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-    <h1 class="text-lg font-bold text-green-700 flex items-center gap-2">
-      <span class="text-2xl">💊</span> Staff POS
-    </h1>
-    <div class="flex items-center gap-2">
-      <button @click="showScanner=true"
-        class="flex items-center gap-1 text-sm bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 px-3 py-1.5 rounded-lg transition">
-        <span>📷</span> Scan Rx
-      </button>
-      <button v-if="cart.length" @click="openCheckout"
-        class="hidden md:flex items-center gap-1 text-sm bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg transition font-semibold">
-        Checkout ₹{{ finalTotal.toFixed(2) }}
-      </button>
-    </div>
-  </div>
 
   <!-- ── Two-column layout ──────────────────────────────────────────────── -->
   <div class="max-w-7xl mx-auto p-4 flex flex-col md:flex-row gap-4 items-start">
@@ -357,6 +362,40 @@ export default defineComponent({
             + Add New Medicine
           </button>
         </div>
+        <!-- Popular Medicines (quick pick) -->
+        <div class="mb-3">
+          <p class="text-xs font-semibold text-gray-500 mb-2">⚡ Popular</p>
+          <div class="flex flex-wrap gap-1.5">
+            <button v-for="m in popularMeds" :key="m.id" @click="addToCart(m)"
+              :class="['text-xs px-2 py-1 rounded-lg border transition font-medium',
+                m.stock>0 ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100' : 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed']"
+              :disabled="m.stock<=0"
+              :title="m.name + ' · ₹' + m.price">
+              {{ m.name.split(' ')[0] }}
+            </button>
+          </div>
+        </div>
+        <!-- Category chips -->
+        <div class="mb-3">
+          <p class="text-xs font-semibold text-gray-500 mb-2">📂 Categories</p>
+          <div class="flex flex-wrap gap-1.5">
+            <button v-for="cat in medCategories" :key="cat"
+              @click="catFilter=cat; medQuery=cat"
+              :class="['text-xs px-2.5 py-1 rounded-lg border transition font-medium',
+                catFilter===cat ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300']">
+              {{ cat }}
+            </button>
+            <button v-if="catFilter" @click="catFilter=''; medQuery=''"
+              class="text-xs px-2 py-1 rounded-lg text-red-500 hover:bg-red-50 border border-red-200">✕</button>
+          </div>
+        </div>
+        <!-- Scan Rx button -->
+        <div class="flex items-center gap-2 mb-3">
+          <button @click="showScanner=true"
+            class="flex items-center gap-1 text-sm bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 px-3 py-1.5 rounded-lg transition">
+            <span>📷</span> Scan Rx
+          </button>
+        </div>
         <input v-model="medQuery" placeholder="Type medicine name, brand or generic (min 2 chars)…"
           class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 mb-2" />
         <div v-if="medResults.length" class="space-y-1 max-h-64 overflow-y-auto">
@@ -377,7 +416,7 @@ export default defineComponent({
             </div>
           </div>
         </div>
-        <p v-else-if="medQuery.length>=2" class="text-sm text-gray-400 text-center py-3">No medicines found.</p>
+        <p v-else-if="medQuery.length>=2 || catFilter" class="text-sm text-gray-400 text-center py-3">No medicines found.</p>
       </div>
 
       <!-- Generic Alternatives -->
@@ -400,6 +439,26 @@ export default defineComponent({
 
     <!-- ══ RIGHT PANEL ═════════════════════════════════════════════════════ -->
     <div class="w-full md:w-96 space-y-4">
+
+      <!-- Cart switcher -->
+      <div class="bg-white rounded-2xl p-3 shadow-sm">
+        <div class="flex items-center gap-2 flex-wrap">
+          <button v-for="(c, i) in carts" :key="i"
+            @click="activeCartIdx = i; clearPatient()"
+            :class="['text-xs px-3 py-1.5 rounded-lg font-medium border transition',
+              activeCartIdx===i ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-200 hover:border-green-400']">
+            Cart {{ i+1 }}{{ c.length ? ' ('+c.length+')' : '' }}
+          </button>
+          <button v-if="carts.length < MAX_CARTS" @click="addCart"
+            class="text-xs px-2.5 py-1.5 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-green-400 hover:text-green-600 transition">
+            + New Cart
+          </button>
+          <button v-if="carts.length > 1" @click="removeCart(activeCartIdx)"
+            class="text-xs px-2 py-1.5 rounded-lg text-red-400 hover:bg-red-50 border border-red-200 ml-auto">
+            Remove Cart
+          </button>
+        </div>
+      </div>
 
       <!-- Cart Items -->
       <div class="bg-white rounded-2xl p-4 shadow-sm">
