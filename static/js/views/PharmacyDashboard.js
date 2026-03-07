@@ -17,7 +17,7 @@ import {
   getInventory, saveInventory, getSalesData,
   getStaff, saveStaff, roleBadgeClass,
   getOrders, saveOrders,
-  getAppointments,
+  getAppointments, saveAppointments, getDoctors,
 } from '../app.js';
 
 export default defineComponent({
@@ -112,13 +112,71 @@ export default defineComponent({
     };
 
     // ── Appointments ───────────────────────────────────────────────────────
-    const appointments = ref(getAppointments());
-    const pharmacyAppointments = computed(() => {
-      const today = new Date().toISOString().split('T')[0];
-      return appointments.value
-        .filter(a => a.pharmacyId === myPharmacyId.value && (a.date === today || a.status === 'scheduled'))
-        .sort((a, b) => a.time.localeCompare(b.time));
-    });
+    const appointments    = ref(getAppointments());
+    const linkedDoctors   = computed(() => getDoctors().filter(d => d.pharmacyId === myPharmacyId.value && d.active));
+    const aptsTab         = ref('pending');   // 'pending' | 'completed'
+
+    const pendingAppointments = computed(() =>
+      appointments.value
+        .filter(a => a.pharmacyId === myPharmacyId.value && a.status === 'scheduled')
+        .sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.time.localeCompare(b.time))
+    );
+    const completedAppointments = computed(() =>
+      appointments.value
+        .filter(a => a.pharmacyId === myPharmacyId.value && a.status === 'completed')
+        .sort((a, b) => new Date(b.completedAt || b.createdAt || 0) - new Date(a.completedAt || a.createdAt || 0))
+    );
+    /** Keep backwards-compat alias */
+    const pharmacyAppointments = pendingAppointments;
+
+    const completeAppointment = (apt) => {
+      const list = getAppointments().map(a =>
+        a.id === apt.id ? { ...a, status: 'completed', completedAt: new Date().toISOString() } : a
+      );
+      saveAppointments(list);
+      appointments.value = list;
+    };
+
+    const cancelAppointment = (apt) => {
+      const list = getAppointments().map(a =>
+        a.id === apt.id ? { ...a, status: 'cancelled' } : a
+      );
+      saveAppointments(list);
+      appointments.value = list;
+    };
+
+    // ── New appointment form ──────────────────────────────────────────────
+    const showNewApt    = ref(false);
+    const APT_TIMES     = ['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','12:00','14:00','14:30','15:00','15:30','16:00','16:30','17:00'];
+    const blankApt      = () => ({ patientName: '', patientPhone: '', doctorId: '', date: '', time: '', reason: '' });
+    const aptForm       = reactive(blankApt());
+    const aptFormError  = ref('');
+
+    const saveNewAppointment = () => {
+      if (!aptForm.patientName || !aptForm.patientPhone || !aptForm.doctorId || !aptForm.date || !aptForm.time) {
+        aptFormError.value = 'Please fill all required fields.'; return;
+      }
+      aptFormError.value = '';
+      const doc = linkedDoctors.value.find(d => d.id === Number(aptForm.doctorId));
+      const list = getAppointments();
+      list.push({
+        id: 'APT-S-' + Date.now() + '-' + Math.floor(Math.random() * 10000).toString().padStart(4, '0'),
+        patientName:  aptForm.patientName,
+        patientPhone: aptForm.patientPhone,
+        doctorId:   Number(aptForm.doctorId),
+        doctorName: doc?.name || '',
+        date:       aptForm.date,
+        time:       aptForm.time,
+        reason:     aptForm.reason || 'Consultation',
+        status:     'scheduled',
+        pharmacyId: myPharmacyId.value,
+        createdAt:  new Date().toISOString(),
+      });
+      saveAppointments(list);
+      appointments.value = list;
+      Object.assign(aptForm, blankApt());
+      showNewApt.value = false;
+    };
 
     /** Returns { text, cls } for the order expiry badge. */
     const orderExpiryBadge = (order) => {
@@ -281,6 +339,10 @@ export default defineComponent({
       orderExpiryBadge, sourceBadge, statusBadgeCls, fmtDateTime,
       // appointments
       appointments, pharmacyAppointments,
+      aptsTab, pendingAppointments, completedAppointments,
+      completeAppointment, cancelAppointment,
+      showNewApt, aptForm, aptFormError, saveNewAppointment,
+      linkedDoctors, APT_TIMES,
       // inventory
       inventory, invSearch, filteredInventory,
       editingStockId, editingStockVal, stockCellCls,
@@ -603,24 +665,110 @@ export default defineComponent({
              PANEL · APPOINTMENTS
              ────────────────────────────────────── -->
         <section v-if="activePanel === 'appointments'">
-          <h1 class="text-2xl font-bold text-gray-900 mb-5">📅 Appointments</h1>
-          <div v-if="pharmacyAppointments.length === 0" class="bg-white rounded-2xl border border-gray-200 px-6 py-12 text-center text-gray-400">
-            <div class="text-5xl mb-3">📅</div>
-            <p class="text-sm">No appointments scheduled for today.</p>
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <h1 class="text-2xl font-bold text-gray-900">📅 Appointments</h1>
+            <button @click="showNewApt=!showNewApt"
+              class="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2.5 rounded-xl text-sm transition">
+              + New Appointment
+            </button>
           </div>
-          <div v-else class="space-y-3">
-            <div v-for="apt in pharmacyAppointments" :key="apt.id"
-              class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 flex flex-wrap items-start gap-4">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 flex-wrap mb-1">
-                  <p class="font-semibold text-gray-900">{{ apt.patientName }}</p>
-                  <span :class="['text-xs px-2 py-0.5 rounded-full font-semibold', apt.status === 'scheduled' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700']">
-                    {{ apt.status }}
-                  </span>
+
+          <!-- New appointment form -->
+          <div v-if="showNewApt" class="bg-white rounded-2xl border border-blue-200 shadow-sm p-5 mb-5">
+            <h2 class="text-sm font-bold text-gray-800 mb-4">📝 Book New Appointment</h2>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input v-model="aptForm.patientName" placeholder="Patient name *"
+                class="border-2 border-gray-200 focus:border-blue-500 rounded-xl px-4 py-2.5 text-sm outline-none" />
+              <input v-model="aptForm.patientPhone" placeholder="Patient phone *" type="tel"
+                class="border-2 border-gray-200 focus:border-blue-500 rounded-xl px-4 py-2.5 text-sm outline-none" />
+              <select v-model="aptForm.doctorId"
+                class="border-2 border-gray-200 focus:border-blue-500 rounded-xl px-4 py-2.5 text-sm outline-none">
+                <option value="">Select doctor *</option>
+                <option v-for="doc in linkedDoctors" :key="doc.id" :value="doc.id">{{ doc.name }} · {{ doc.specialty }}</option>
+              </select>
+              <input v-model="aptForm.date" type="date"
+                class="border-2 border-gray-200 focus:border-blue-500 rounded-xl px-4 py-2.5 text-sm outline-none" />
+              <select v-model="aptForm.time"
+                class="border-2 border-gray-200 focus:border-blue-500 rounded-xl px-4 py-2.5 text-sm outline-none">
+                <option value="">Select time *</option>
+                <option v-for="t in APT_TIMES" :key="t" :value="t">{{ t }}</option>
+              </select>
+              <input v-model="aptForm.reason" placeholder="Reason for visit"
+                class="border-2 border-gray-200 focus:border-blue-500 rounded-xl px-4 py-2.5 text-sm outline-none" />
+            </div>
+            <div v-if="aptFormError" class="mt-2 text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2">{{ aptFormError }}</div>
+            <div class="flex gap-3 mt-4">
+              <button @click="showNewApt=false" class="flex-1 py-2.5 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 text-sm">Cancel</button>
+              <button @click="saveNewAppointment" class="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition">Confirm Booking</button>
+            </div>
+          </div>
+
+          <!-- Tabs: Pending / Completed -->
+          <div class="flex gap-1 mb-4 bg-white rounded-xl border border-gray-200 p-1 w-fit">
+            <button @click="aptsTab='pending'"
+              :class="['px-4 py-2 rounded-lg text-sm font-semibold transition',
+                aptsTab==='pending' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-700']">
+              ⏳ Pending
+              <span v-if="pendingAppointments.length" class="ml-1 text-[11px] bg-white/30 px-1.5 py-0.5 rounded-full">{{ pendingAppointments.length }}</span>
+            </button>
+            <button @click="aptsTab='completed'"
+              :class="['px-4 py-2 rounded-lg text-sm font-semibold transition',
+                aptsTab==='completed' ? 'bg-green-600 text-white' : 'text-gray-500 hover:text-gray-700']">
+              ✅ Completed
+              <span v-if="completedAppointments.length" class="ml-1 text-[11px] bg-white/20 px-1.5 py-0.5 rounded-full">{{ completedAppointments.length }}</span>
+            </button>
+          </div>
+
+          <!-- Pending appointments -->
+          <div v-if="aptsTab === 'pending'">
+            <div v-if="pendingAppointments.length === 0" class="bg-white rounded-2xl border border-gray-200 px-6 py-12 text-center text-gray-400">
+              <div class="text-5xl mb-3">📅</div>
+              <p class="text-sm">No pending appointments.</p>
+            </div>
+            <div v-else class="space-y-3">
+              <div v-for="apt in pendingAppointments" :key="apt.id"
+                class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 flex flex-wrap items-start gap-4">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap mb-1">
+                    <p class="font-semibold text-gray-900">{{ apt.patientName }}</p>
+                    <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-blue-100 text-blue-700">scheduled</span>
+                  </div>
+                  <p class="text-xs text-gray-500">{{ apt.patientPhone }}</p>
+                  <p class="text-xs text-blue-600 mt-0.5">{{ apt.reason }}</p>
+                  <p class="text-xs text-gray-400 mt-0.5">🩺 {{ apt.doctorName }} · ⏰ {{ apt.time }} · 📅 {{ apt.date }}</p>
                 </div>
-                <p class="text-xs text-gray-500">{{ apt.patientPhone }}</p>
-                <p class="text-xs text-blue-600 mt-0.5">{{ apt.reason }}</p>
-                <p class="text-xs text-gray-400 mt-0.5">🩺 {{ apt.doctorName }} · ⏰ {{ apt.time }} · 📅 {{ apt.date }}</p>
+                <div class="flex gap-2 flex-wrap shrink-0">
+                  <button @click="completeAppointment(apt)"
+                    class="text-xs bg-green-600 hover:bg-green-700 text-white font-semibold px-3 py-1.5 rounded-lg transition">
+                    ✅ Done
+                  </button>
+                  <button @click="cancelAppointment(apt)"
+                    class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold px-3 py-1.5 rounded-lg transition">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Completed appointments -->
+          <div v-if="aptsTab === 'completed'">
+            <div v-if="completedAppointments.length === 0" class="bg-white rounded-2xl border border-gray-200 px-6 py-12 text-center text-gray-400">
+              <div class="text-5xl mb-3">✅</div>
+              <p class="text-sm">No completed appointments yet.</p>
+            </div>
+            <div v-else class="space-y-3">
+              <div v-for="apt in completedAppointments" :key="apt.id"
+                class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 flex flex-wrap items-start gap-4 opacity-80">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap mb-1">
+                    <p class="font-semibold text-gray-700">{{ apt.patientName }}</p>
+                    <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-green-100 text-green-700">completed</span>
+                  </div>
+                  <p class="text-xs text-gray-500">{{ apt.patientPhone }}</p>
+                  <p class="text-xs text-gray-400 mt-0.5">🩺 {{ apt.doctorName }} · ⏰ {{ apt.time }} · 📅 {{ apt.date }}</p>
+                  <p v-if="apt.completedAt" class="text-xs text-green-600 mt-0.5">✅ Completed {{ fmtDateTime(apt.completedAt) }}</p>
+                </div>
               </div>
             </div>
           </div>
